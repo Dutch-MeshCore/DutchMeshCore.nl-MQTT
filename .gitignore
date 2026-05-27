@@ -20,3 +20,4 @@ venv/
 src/certs/x509_crt_bundle.bin
 ssl_certs/cacert.pem
 platformio.local.ini
+.prebuilt - Copy/T-Beam_SX1276_room_server_observer_mqtt-1.15.0-dutchmeshcore.nl-0a493182.bin
