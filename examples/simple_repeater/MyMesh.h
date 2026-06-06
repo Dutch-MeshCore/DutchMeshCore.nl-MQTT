@@ -34,6 +34,7 @@
 #endif
 
 #include <helpers/AdvertDataHelpers.h>
+#include <helpers/AlertReporter.h>
 #include <helpers/ArduinoHelpers.h>
 #include <helpers/ClientACL.h>
 #include <helpers/CommonCLI.h>
@@ -76,11 +77,11 @@ struct NeighbourInfo {
 };
 
 #ifndef FIRMWARE_BUILD_DATE
-  #define FIRMWARE_BUILD_DATE   "21 May 2026 dutchmeshcore.nl"
+  #define FIRMWARE_BUILD_DATE   "27 May 2026 dutchmeshcore.nl"
 #endif
 
 #ifndef FIRMWARE_VERSION
-  #define FIRMWARE_VERSION   "v1.15.0-dutchmeshcore.nl"
+  #define FIRMWARE_VERSION   "v1.16.0-dutchmeshcore.nl"
 #endif
 
 #define FIRMWARE_ROLE "repeater"
@@ -130,6 +131,7 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
 #ifdef WITH_SNMP
   MeshSNMPAgent _snmp_agent;
 #endif
+  AlertReporter _alerter;
 
   void putNeighbour(const mesh::Identity& id, uint32_t timestamp, float snr);
   uint8_t handleLoginReq(const mesh::Identity& sender, const uint8_t* secret, uint32_t sender_timestamp, const uint8_t* data, bool is_flood);
@@ -211,6 +213,10 @@ public:
 
   // CommonCLICallbacks
   void applyTempRadioParams(float freq, float bw, uint8_t sf, uint8_t cr, int timeout_mins) override;
+
+  void onAlertConfigChanged() override { _alerter.onConfigChanged(); }
+  bool sendAlertText(const char* text) override { return _alerter.sendText(text); }
+  bool resolveAlertScope(TransportKey& dest) override;
   bool formatFileSystem() override;
   void sendSelfAdvertisement(int delay_millis, bool flood) override;
   void updateAdvertTimer() override;
@@ -265,10 +271,16 @@ public:
       bridge->setStatsSources(this, _radio, _cli.getBoard(), _ms);
 #endif
       bridge->begin();
+#ifdef WITH_MQTT_BRIDGE
+      _alerter.setBridge(bridge);
+#endif
     }
     else
     {
       bridge->end();
+#ifdef WITH_MQTT_BRIDGE
+      _alerter.setBridge(nullptr);
+#endif
     }
   }
 

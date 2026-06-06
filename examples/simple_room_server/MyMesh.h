@@ -32,11 +32,11 @@
 /* ------------------------------ Config -------------------------------- */
 
 #ifndef FIRMWARE_BUILD_DATE
-  #define FIRMWARE_BUILD_DATE   "19 Apr 2026 dutchmeshcore.nl"
+  #define FIRMWARE_BUILD_DATE   "27 May 2026 dutchmeshcore.nl"
 #endif
 
 #ifndef FIRMWARE_VERSION
-  #define FIRMWARE_VERSION   "v1.15.0-dutchmeshcore.nl"
+  #define FIRMWARE_VERSION   "v1.16.0-dutchmeshcore.nl"
 #endif
 
 #ifndef LORA_FREQ
@@ -198,6 +198,7 @@ public:
 
   // CommonCLICallbacks
   void applyTempRadioParams(float freq, float bw, uint8_t sf, uint8_t cr, int timeout_mins) override;
+  bool resolveAlertScope(TransportKey& dest) override;
   bool formatFileSystem() override;
   void sendSelfAdvertisement(int delay_millis, bool flood) override;
   void updateAdvertTimer() override;

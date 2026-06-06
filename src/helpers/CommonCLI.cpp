@@ -2,7 +2,9 @@
 #include "CommonCLI.h"
 #include "TxtDataHelpers.h"
 #include "AdvertDataHelpers.h"
+#include "AlertReporter.h"  // for alertReporterBannedChannelMatch()
 #include <RTClib.h>
+#include <Utils.h>
 
 #ifndef BRIDGE_MAX_BAUD
 #define BRIDGE_MAX_BAUD 115200
@@ -15,6 +17,7 @@
 #endif
 #ifdef WITH_MQTT_BRIDGE
 #include "bridges/MQTTBridge.h"
+#include "MQTTDefaults.h"
 
 // Helper function to calculate total size of MQTT fields for file format compatibility
 // Uses NodePrefs struct to get accurate field sizes
@@ -273,12 +276,57 @@ void CommonCLI::loadPrefsInt(FILESYSTEM* fs, const char* filename) {
       remaining -= to_read;
     }
     file.read((uint8_t *)&_prefs->rx_boosted_gain, sizeof(_prefs->rx_boosted_gain));              // 290
-    file.read((uint8_t *)&_prefs->snmp_enabled, sizeof(_prefs->snmp_enabled));                    // 291
-    file.read((uint8_t *)&_prefs->snmp_community, sizeof(_prefs->snmp_community));                // 292
-    if (file.available() >= (int)sizeof(_prefs->radio_watchdog_minutes)) {
-      file.read((uint8_t *)&_prefs->radio_watchdog_minutes, sizeof(_prefs->radio_watchdog_minutes)); // 316
+    {
+      // Tail layout (current): 291-292 flood_max_*, 293+ snmp/alert fields.
+      // Legacy flex-branch files stored snmp at 291 without flood_max_* fields.
+      uint8_t byte291, byte292;
+      file.read(&byte291, 1);
+      file.read(&byte292, 1);
+      if (byte291 <= 1 && byte292 > 64) {
+        _prefs->snmp_enabled = byte291;
+        _prefs->snmp_community[0] = (char)byte292;
+        file.read((uint8_t *)&_prefs->snmp_community[1], sizeof(_prefs->snmp_community) - 1);
+      } else {
+        _prefs->flood_max_unscoped = byte291;
+        _prefs->flood_max_advert = byte292;
+        if (file.available() >= (int)sizeof(_prefs->snmp_enabled)) {
+          file.read((uint8_t *)&_prefs->snmp_enabled, sizeof(_prefs->snmp_enabled));              // 293
+        }
+        if (file.available() >= (int)sizeof(_prefs->snmp_community)) {
+          file.read((uint8_t *)&_prefs->snmp_community, sizeof(_prefs->snmp_community));            // 294
+        }
+      }
     }
-    // next: 317
+    if (file.available() >= (int)sizeof(_prefs->radio_watchdog_minutes)) {
+      file.read((uint8_t *)&_prefs->radio_watchdog_minutes, sizeof(_prefs->radio_watchdog_minutes)); // 318
+    }
+    // Alert channel fields (appended; older files won't have them — defaults from MyMesh ctor remain)
+    if (file.available() >= (int)sizeof(_prefs->alert_enabled)) {
+      file.read((uint8_t *)&_prefs->alert_enabled, sizeof(_prefs->alert_enabled));
+    }
+    if (file.available() >= (int)sizeof(_prefs->alert_psk_hex)) {
+      file.read((uint8_t *)&_prefs->alert_psk_hex, sizeof(_prefs->alert_psk_hex));
+    }
+    if (file.available() >= (int)sizeof(_prefs->alert_wifi_minutes)) {
+      file.read((uint8_t *)&_prefs->alert_wifi_minutes, sizeof(_prefs->alert_wifi_minutes));
+    }
+    if (file.available() >= (int)sizeof(_prefs->alert_mqtt_minutes)) {
+      file.read((uint8_t *)&_prefs->alert_mqtt_minutes, sizeof(_prefs->alert_mqtt_minutes));
+    }
+    if (file.available() >= (int)sizeof(_prefs->alert_min_interval_min)) {
+      file.read((uint8_t *)&_prefs->alert_min_interval_min, sizeof(_prefs->alert_min_interval_min));
+    }
+    if (file.available() >= (int)sizeof(_prefs->alert_hashtag)) {
+      file.read((uint8_t *)&_prefs->alert_hashtag, sizeof(_prefs->alert_hashtag));
+    }
+    if (file.available() >= (int)sizeof(_prefs->alert_region)) {
+      file.read((uint8_t *)&_prefs->alert_region, sizeof(_prefs->alert_region));
+    }
+    // ensure null termination after raw read
+    _prefs->snmp_community[sizeof(_prefs->snmp_community) - 1] = '\0';
+    _prefs->alert_psk_hex[sizeof(_prefs->alert_psk_hex) - 1] = '\0';
+    _prefs->alert_hashtag[sizeof(_prefs->alert_hashtag) - 1] = '\0';
+    _prefs->alert_region[sizeof(_prefs->alert_region) - 1] = '\0';
 
     // sanitise bad pref values
     _prefs->rx_delay_base = constrain(_prefs->rx_delay_base, 0, 20.0f);
@@ -398,10 +446,19 @@ void CommonCLI::savePrefs(FILESYSTEM* fs) {
       remaining -= to_write;
     }
     file.write((uint8_t *)&_prefs->rx_boosted_gain, sizeof(_prefs->rx_boosted_gain));              // 290
-    file.write((uint8_t *)&_prefs->snmp_enabled, sizeof(_prefs->snmp_enabled));                    // 291
-    file.write((uint8_t *)&_prefs->snmp_community, sizeof(_prefs->snmp_community));                // 292
-    file.write((uint8_t *)&_prefs->radio_watchdog_minutes, sizeof(_prefs->radio_watchdog_minutes)); // 316
-    // next: 317
+    file.write((uint8_t *)&_prefs->flood_max_unscoped, sizeof(_prefs->flood_max_unscoped));   // 291
+    file.write((uint8_t *)&_prefs->flood_max_advert, sizeof(_prefs->flood_max_advert));       // 292
+    file.write((uint8_t *)&_prefs->snmp_enabled, sizeof(_prefs->snmp_enabled));                    // 293
+    file.write((uint8_t *)&_prefs->snmp_community, sizeof(_prefs->snmp_community));                // 294
+    file.write((uint8_t *)&_prefs->radio_watchdog_minutes, sizeof(_prefs->radio_watchdog_minutes)); // 318
+    // Alert channel fields (appended)
+    file.write((uint8_t *)&_prefs->alert_enabled, sizeof(_prefs->alert_enabled));
+    file.write((uint8_t *)&_prefs->alert_psk_hex, sizeof(_prefs->alert_psk_hex));
+    file.write((uint8_t *)&_prefs->alert_wifi_minutes, sizeof(_prefs->alert_wifi_minutes));
+    file.write((uint8_t *)&_prefs->alert_mqtt_minutes, sizeof(_prefs->alert_mqtt_minutes));
+    file.write((uint8_t *)&_prefs->alert_min_interval_min, sizeof(_prefs->alert_min_interval_min));
+    file.write((uint8_t *)&_prefs->alert_hashtag, sizeof(_prefs->alert_hashtag));
+    file.write((uint8_t *)&_prefs->alert_region, sizeof(_prefs->alert_region));
 
     file.close();
   }
@@ -808,6 +865,21 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
     } else if (memcmp(command, "clear stats", 11) == 0) {
       _callbacks->clearStats();
       strcpy(reply, "(OK - stats reset)");
+    } else if (memcmp(command, "alert test", 10) == 0 && (command[10] == 0 || command[10] == ' ')) {
+      // Send a one-off test alert on the configured alert channel.
+      const char* extra = command[10] == ' ' ? &command[11] : "";
+      char text[120];
+      if (*extra) {
+        snprintf(text, sizeof(text), "[test] %s", extra);
+      } else {
+        strcpy(text, "[test] alert channel ok");
+      }
+      if (!_prefs->alert_psk_hex[0]) {
+        strcpy(reply, "Error: alert channel not configured (set alert.psk or set alert.hashtag)");
+      } else {
+        bool ok = _callbacks->sendAlertText(text);
+        strcpy(reply, ok ? "OK - alert sent" : "Error: alert send failed (bad PSK or PUBLIC key refused?)");
+      }
     } else if (memcmp(command, "get ", 4) == 0) {
       handleGetCmd(sender_timestamp, command, reply);
     } else if (memcmp(command, "set ", 4) == 0) {
@@ -945,13 +1017,23 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
       }
 #endif
     } else if (memcmp(command, "powersaving on", 14) == 0) {
+#if defined(NRF52_PLATFORM)
       _prefs->powersaving_enabled = 1;
       savePrefs();
-      strcpy(reply, "ok"); // TODO: to return Not supported if required
+      strcpy(reply, "on - Immediate effect");
+#elif defined(ESP32) && !defined(WITH_BRIDGE)
+      _prefs->powersaving_enabled = 1;
+      savePrefs();
+      strcpy(reply, "on - After 2 minutes");
+#elif defined(WITH_BRIDGE)
+      strcpy(reply, "Bridge not supported");
+#else
+      strcpy(reply, "Board not supported");
+#endif
     } else if (memcmp(command, "powersaving off", 15) == 0) {
       _prefs->powersaving_enabled = 0;
       savePrefs();
-      strcpy(reply, "ok");
+      strcpy(reply, "off");
     } else if (memcmp(command, "powersaving", 11) == 0) {
       if (_prefs->powersaving_enabled) {
         strcpy(reply, "on");
@@ -1090,7 +1172,7 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
     _prefs->disable_fwd = memcmp(&config[7], "off", 3) == 0;
     savePrefs();
     strcpy(reply, _prefs->disable_fwd ? "OK - repeat is now OFF" : "OK - repeat is now ON");
-#if defined(USE_SX1262) || defined(USE_SX1268)
+#if defined(USE_SX1262) || defined(USE_SX1268) || defined(USE_LR1110)
   } else if (memcmp(config, "radio.rxgain ", 13) == 0) {
     _prefs->rx_boosted_gain = memcmp(&config[13], "on", 2) == 0;
     strcpy(reply, "OK");
@@ -1140,6 +1222,24 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
       strcpy(reply, "OK");
     } else {
       strcpy(reply, "Error, must be 0-2");
+    }
+  } else if (memcmp(config, "flood.max.unscoped ", 19) == 0) {
+    uint8_t m = atoi(&config[19]);
+    if (m <= 64) {
+      _prefs->flood_max_unscoped = m;
+      savePrefs();
+      strcpy(reply, "OK");
+    } else {
+      strcpy(reply, "Error, max 64");
+    } 
+  } else if (memcmp(config, "flood.max.advert ", 17) == 0) {
+    uint8_t m = atoi(&config[17]);
+    if (m <= 64) {
+      _prefs->flood_max_advert = m;
+      savePrefs();
+      strcpy(reply, "OK");
+    } else {
+      strcpy(reply, "Error, max 64");
     }
   } else if (memcmp(config, "flood.max ", 10) == 0) {
     uint8_t m = atoi(&config[10]);
@@ -1420,6 +1520,12 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
           } else if (p && p->topic_style == MQTT_TOPIC_MESHCORE &&
                      (strlen(_prefs->mqtt_iata) == 0 || strcmp(_prefs->mqtt_iata, "XXX") == 0)) {
             sprintf(reply, "OK - slot %d preset: %s (run 'set mqtt.iata <airport_code>' to publish)", slot + 1, preset_name);
+          } else if (p && mqttPresetNeedsSlotCredentials(p) &&
+                     (_prefs->mqtt_slot_username[slot][0] == '\0' ||
+                      _prefs->mqtt_slot_password[slot][0] == '\0')) {
+            sprintf(reply,
+                    "OK - slot %d preset: %s (run 'set mqtt%d.username <user>' and 'set mqtt%d.password <pass>' to connect)",
+                    slot + 1, preset_name, slot + 1, slot + 1);
           } else {
             sprintf(reply, "OK - slot %d preset: %s", slot + 1, preset_name);
           }
@@ -1443,10 +1549,12 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
     } else if (memcmp(subcmd, "username ", 9) == 0) {
       StrHelper::strncpy(_prefs->mqtt_slot_username[slot], &subcmd[9], sizeof(_prefs->mqtt_slot_username[slot]));
       savePrefs();
+      _callbacks->restartBridgeSlot(slot);
       strcpy(reply, "OK");
     } else if (memcmp(subcmd, "password ", 9) == 0) {
       StrHelper::strncpy(_prefs->mqtt_slot_password[slot], &subcmd[9], sizeof(_prefs->mqtt_slot_password[slot]));
       savePrefs();
+      _callbacks->restartBridgeSlot(slot);
       strcpy(reply, "OK");
     } else if (memcmp(subcmd, "token ", 6) == 0) {
       StrHelper::strncpy(_prefs->mqtt_slot_token[slot], &subcmd[6], sizeof(_prefs->mqtt_slot_token[slot]));
@@ -1528,6 +1636,173 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
     savePrefs();
     strcpy(reply, "OK");
 #endif
+  } else if (memcmp(config, "alert ", 6) == 0) {
+    // set alert on|off
+    const char* val = &config[6];
+    if (memcmp(val, "on", 2) == 0 && (val[2] == 0 || val[2] == ' ')) {
+      _prefs->alert_enabled = 1;
+      savePrefs();
+      _callbacks->onAlertConfigChanged();
+      strcpy(reply, "OK - alerts on");
+    } else if (memcmp(val, "off", 3) == 0 && (val[3] == 0 || val[3] == ' ')) {
+      _prefs->alert_enabled = 0;
+      savePrefs();
+      _callbacks->onAlertConfigChanged();
+      strcpy(reply, "OK - alerts off");
+    } else {
+      strcpy(reply, "Error: usage set alert on|off");
+    }
+  } else if (memcmp(config, "alert.psk", 9) == 0 && (config[9] == 0 || config[9] == ' ')) {
+    // `set alert.psk` with no argument clears the field (alerts then disabled
+    // until a new psk/hashtag is configured).
+    const char* val = (config[9] == ' ') ? &config[10] : "";
+    while (*val == ' ') val++;
+    size_t len = strlen(val);
+    if (len == 0) {
+      _prefs->alert_psk_hex[0] = '\0';
+      _prefs->alert_hashtag[0] = '\0';
+      savePrefs();
+      _callbacks->onAlertConfigChanged();
+      strcpy(reply, "OK - alert.psk cleared (alerts disabled until configured)");
+    } else if (val[0] == '#') {
+      strcpy(reply, "Error: use 'set alert.hashtag' for hashtag channels");
+    } else if (len != 32) {
+      // 16-byte channel secret = 32 hex chars. This is what the mobile app's
+      // "Share Channel" emits, what `set alert.hashtag` derives, and what the
+      // BANNED_ALERT_CHANNELS table holds. 32-byte channels aren't used
+      // anywhere in MeshCore practice.
+      strcpy(reply, "Error: PSK must be 32 hex chars (16-byte channel secret)");
+    } else {
+      // Validate all-hex, then normalize via fromHex/toHex so the stored
+      // form is always lowercase regardless of input case.
+      uint8_t raw[16];
+      bool all_hex = true;
+      for (size_t i = 0; i < len; i++) {
+        if (!mesh::Utils::isHexChar(val[i])) { all_hex = false; break; }
+      }
+      if (!all_hex || !mesh::Utils::fromHex(raw, 16, val)) {
+        strcpy(reply, "Error: PSK must be 32 hex chars (16-byte channel secret)");
+      } else {
+        char normalized[33];
+        mesh::Utils::toHex(normalized, raw, 16);
+        if (const char* banned = alertReporterBannedChannelMatchHex(normalized)) {
+          // Refuse any key on the banned channel list (Public PSK, well-known
+          // auto-responder hashtags like #test/#bot, etc.). Fault alerts on
+          // those channels would spam every node in the area.
+          sprintf(reply, "Error: refusing banned channel '%s'; pick a private key or hashtag", banned);
+        } else {
+          StrHelper::strncpy(_prefs->alert_psk_hex, normalized, sizeof(_prefs->alert_psk_hex));
+          // The new PSK is operator-supplied, so any previously-derived
+          // hashtag name is no longer accurate provenance — drop it.
+          _prefs->alert_hashtag[0] = '\0';
+          savePrefs();
+          _callbacks->onAlertConfigChanged();
+          strcpy(reply, "OK - alert.psk updated");
+        }
+      }
+    }
+  } else if (memcmp(config, "alert.hashtag", 13) == 0 && (config[13] == 0 || config[13] == ' ')) {
+    const char* val = (config[13] == ' ') ? &config[14] : "";
+    while (*val == ' ') val++;
+    size_t in_len = strlen(val);
+    if (in_len == 0) {
+      _prefs->alert_psk_hex[0] = '\0';
+      _prefs->alert_hashtag[0] = '\0';
+      savePrefs();
+      _callbacks->onAlertConfigChanged();
+      strcpy(reply, "OK - alert.hashtag cleared (alerts disabled until configured)");
+    } else {
+      // Canonical stored form is "#name" because the leading '#' is part of
+      // the sha256 input (matching the companion-app hashtag-channel
+      // derivation in docs/companion_protocol.md). Accept the user typing
+      // either "alerts" or "#alerts".
+      char hashtag[sizeof(_prefs->alert_hashtag)];
+      size_t need = (val[0] == '#') ? in_len : in_len + 1;
+      if (need >= sizeof(hashtag)) {
+        strcpy(reply, "Error: hashtag too long");
+      } else {
+        if (val[0] == '#') {
+          StrHelper::strncpy(hashtag, val, sizeof(hashtag));
+        } else {
+          hashtag[0] = '#';
+          StrHelper::strncpy(&hashtag[1], val, sizeof(hashtag) - 1);
+        }
+
+        // Derive the channel key once: first 16 bytes of sha256("#name"),
+        // store hex-encoded in alert_psk_hex. We don't re-derive on every
+        // send — operators can later override with `set alert.psk` without
+        // leaving stale hashtag text behind.
+        uint8_t digest[32];
+        mesh::Utils::sha256(digest, sizeof(digest),
+                            (const uint8_t*)hashtag, (int)strlen(hashtag));
+        if (const char* banned = alertReporterBannedChannelMatch(digest)) {
+          // Hashtag derives to a banned key (e.g. `set alert.hashtag test`
+          // hits the #test entry). Refuse before clobbering existing config.
+          sprintf(reply, "Error: refusing banned channel '%s'", banned);
+        } else {
+          char hex[33];
+          mesh::Utils::toHex(hex, digest, 16);
+          StrHelper::strncpy(_prefs->alert_hashtag, hashtag, sizeof(_prefs->alert_hashtag));
+          StrHelper::strncpy(_prefs->alert_psk_hex, hex, sizeof(_prefs->alert_psk_hex));
+          savePrefs();
+          _callbacks->onAlertConfigChanged();
+          sprintf(reply, "OK - alert.hashtag: %s", _prefs->alert_hashtag);
+        }
+      }
+    }
+  } else if (memcmp(config, "alert.region", 12) == 0 && (config[12] == 0 || config[12] == ' ')) {
+    // `set alert.region <name>` overrides the repeater's default_scope for
+    // alert sends only. `set alert.region` (no arg) clears it. The name is
+    // looked up lazily via RegionMap at send time; we deliberately don't
+    // mutate the region map here, so naming an unknown region is allowed
+    // but will silently fall back to default_scope until the operator runs
+    // `region put` for it.
+    const char* val = (config[12] == ' ') ? &config[13] : "";
+    while (*val == ' ') val++;
+    size_t len = strlen(val);
+    if (len == 0) {
+      _prefs->alert_region[0] = '\0';
+      savePrefs();
+      _callbacks->onAlertConfigChanged();
+      strcpy(reply, "OK - alert.region cleared (using default scope)");
+    } else if (len >= sizeof(_prefs->alert_region)) {
+      strcpy(reply, "Error: alert.region too long");
+    } else {
+      StrHelper::strncpy(_prefs->alert_region, val, sizeof(_prefs->alert_region));
+      StrHelper::stripSurroundingQuotes(_prefs->alert_region, sizeof(_prefs->alert_region));
+      savePrefs();
+      _callbacks->onAlertConfigChanged();
+      sprintf(reply, "OK - alert.region: %s", _prefs->alert_region);
+    }
+  } else if (memcmp(config, "alert.wifi ", 11) == 0) {
+    int mins = (int)_atoi(&config[11]);
+    if (mins < 0 || mins > 1440) {
+      strcpy(reply, "Error: alert.wifi must be 0-1440 minutes (0=off)");
+    } else {
+      _prefs->alert_wifi_minutes = (uint16_t)mins;
+      savePrefs();
+      sprintf(reply, "OK - alert.wifi %d min%s", mins, mins == 0 ? " (disabled)" : "");
+    }
+  } else if (memcmp(config, "alert.mqtt ", 11) == 0) {
+    int mins = (int)_atoi(&config[11]);
+    if (mins < 0 || mins > 10080) {
+      strcpy(reply, "Error: alert.mqtt must be 0-10080 minutes (0=off)");
+    } else {
+      _prefs->alert_mqtt_minutes = (uint16_t)mins;
+      savePrefs();
+      sprintf(reply, "OK - alert.mqtt %d min%s", mins, mins == 0 ? " (disabled)" : "");
+    }
+  } else if (memcmp(config, "alert.interval ", 15) == 0) {
+    int mins = (int)_atoi(&config[15]);
+    // Floor at 60 min: faster re-fires would let a flapping link spam the
+    // mesh with a fresh GRP_TXT flood every minute — terrible for airtime.
+    if (mins < 60 || mins > 10080) {
+      strcpy(reply, "Error: alert.interval must be 60-10080 minutes");
+    } else {
+      _prefs->alert_min_interval_min = (uint16_t)mins;
+      savePrefs();
+      sprintf(reply, "OK - alert.interval %d min", mins);
+    }
   } else if (memcmp(config, "adc.multiplier ", 15) == 0) {
     _prefs->adc_multiplier = atof(&config[15]);
     if (_board->setAdcMultiplier(_prefs->adc_multiplier)) {
@@ -1584,7 +1859,7 @@ void CommonCLI::handleGetCmd(uint32_t sender_timestamp, char* command, char* rep
     sprintf(reply, "> %s", StrHelper::ftoa(_prefs->node_lat));
   } else if (memcmp(config, "lon", 3) == 0) {
     sprintf(reply, "> %s", StrHelper::ftoa(_prefs->node_lon));
-#if defined(USE_SX1262) || defined(USE_SX1268)
+#if defined(USE_SX1262) || defined(USE_SX1268) || defined(USE_LR1110)
   } else if (memcmp(config, "radio.rxgain", 12) == 0) {
     sprintf(reply, "> %s", _prefs->rx_boosted_gain ? "on" : "off");
 #endif
@@ -1597,6 +1872,10 @@ void CommonCLI::handleGetCmd(uint32_t sender_timestamp, char* command, char* rep
     sprintf(reply, "> %s", StrHelper::ftoa(_prefs->rx_delay_base));
   } else if (memcmp(config, "txdelay", 7) == 0) {
     sprintf(reply, "> %s", StrHelper::ftoa(_prefs->tx_delay_factor));
+  } else if (memcmp(config, "flood.max.advert", 16) == 0) {
+    sprintf(reply, "> %d", (uint32_t)_prefs->flood_max_advert);
+  } else if (memcmp(config, "flood.max.unscoped", 18) == 0) {
+    sprintf(reply, "> %d", (uint32_t)_prefs->flood_max_unscoped);
   } else if (memcmp(config, "flood.max", 9) == 0) {
     sprintf(reply, "> %d", (uint32_t)_prefs->flood_max);
   } else if (memcmp(config, "direct.txdelay", 14) == 0) {
@@ -1835,6 +2114,22 @@ void CommonCLI::handleGetCmd(uint32_t sender_timestamp, char* command, char* rep
   #else
       strcpy(reply, "ERROR: unsupported");
   #endif
+  } else if (memcmp(config, "alert.hashtag", 13) == 0) {
+    sprintf(reply, "> %s", _prefs->alert_hashtag[0] ? _prefs->alert_hashtag : "(unset)");
+  } else if (sender_timestamp == 0 && memcmp(config, "alert.psk", 9) == 0) {  // from serial command line only
+    sprintf(reply, "> %s", _prefs->alert_psk_hex[0] ? _prefs->alert_psk_hex : "(unset)");
+  } else if (memcmp(config, "alert.region", 12) == 0) {
+    sprintf(reply, "> %s", _prefs->alert_region[0] ? _prefs->alert_region : "(unset, using default scope)");
+  } else if (memcmp(config, "alert.wifi", 10) == 0) {
+    sprintf(reply, "> %u min%s", (unsigned)_prefs->alert_wifi_minutes,
+            _prefs->alert_wifi_minutes == 0 ? " (disabled)" : "");
+  } else if (memcmp(config, "alert.mqtt", 10) == 0) {
+    sprintf(reply, "> %u min%s", (unsigned)_prefs->alert_mqtt_minutes,
+            _prefs->alert_mqtt_minutes == 0 ? " (disabled)" : "");
+  } else if (memcmp(config, "alert.interval", 14) == 0) {
+    sprintf(reply, "> %u min", (unsigned)_prefs->alert_min_interval_min);
+  } else if (memcmp(config, "alert", 5) == 0 && (config[5] == 0 || config[5] == '\n' || config[5] == '\r')) {
+    sprintf(reply, "> %s", _prefs->alert_enabled ? "on" : "off");
   } else if (memcmp(config, "adc.multiplier", 14) == 0) {
     float adc_mult = _board->getAdcMultiplier();
     if (adc_mult == 0.0f) {

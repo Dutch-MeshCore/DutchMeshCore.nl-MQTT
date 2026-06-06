@@ -24,7 +24,7 @@
 #define CMD_REBOOT                    19
 #define CMD_GET_BATT_AND_STORAGE      20   // was CMD_GET_BATTERY_VOLTAGE
 #define CMD_SET_TUNING_PARAMS         21
-#define CMD_DEVICE_QEURY              22
+#define CMD_DEVICE_QUERY              22
 #define CMD_EXPORT_PRIVATE_KEY        23
 #define CMD_IMPORT_PRIVATE_KEY        24
 #define CMD_SEND_RAW_DATA             25
@@ -81,7 +81,7 @@
 #define RESP_CODE_NO_MORE_MESSAGES    10 // a reply to CMD_SYNC_NEXT_MESSAGE
 #define RESP_CODE_EXPORT_CONTACT      11
 #define RESP_CODE_BATT_AND_STORAGE    12 // a reply to a CMD_GET_BATT_AND_STORAGE
-#define RESP_CODE_DEVICE_INFO         13 // a reply to CMD_DEVICE_QEURY
+#define RESP_CODE_DEVICE_INFO         13 // a reply to CMD_DEVICE_QUERY
 #define RESP_CODE_PRIVATE_KEY         14 // a reply to CMD_EXPORT_PRIVATE_KEY
 #define RESP_CODE_DISABLED            15
 #define RESP_CODE_CONTACT_MSG_RECV_V3 16 // a reply to CMD_SYNC_NEXT_MESSAGE (ver >= 3)
@@ -1006,7 +1006,7 @@ void MyMesh::startInterface(BaseSerialInterface &serial) {
 }
 
 void MyMesh::handleCmdFrame(size_t len) {
-  if (cmd_frame[0] == CMD_DEVICE_QEURY && len >= 2) { // sent when app establishes connection
+  if (cmd_frame[0] == CMD_DEVICE_QUERY && len >= 2) { // sent when app establishes connection
     app_target_ver = cmd_frame[1];                    // which version of protocol does app understand
 
     int i = 0;
@@ -1112,7 +1112,7 @@ void MyMesh::handleCmdFrame(size_t len) {
     } else {
       writeErrFrame(recipient == NULL
                         ? ERR_CODE_NOT_FOUND
-                        : ERR_CODE_UNSUPPORTED_CMD); // unknown recipient, or unsuported TXT_TYPE_*
+                        : ERR_CODE_UNSUPPORTED_CMD); // unknown recipient, or unsupported TXT_TYPE_*
     }
   } else if (cmd_frame[0] == CMD_SEND_CHANNEL_TXT_MSG) { // send GroupChannel text msg
     int i = 1;
@@ -1536,6 +1536,15 @@ void MyMesh::handleCmdFrame(size_t len) {
   } else if (cmd_frame[0] == CMD_SEND_ANON_REQ && len > 1 + PUB_KEY_SIZE) {
     uint8_t *pub_key = &cmd_frame[1];
     ContactInfo *recipient = lookupContactByPubKey(pub_key, PUB_KEY_SIZE);
+    ContactInfo anon;
+    if (recipient == NULL) { // FIRMWARE_VER_CODE 13+,  allow non-contact requests
+      memset(&anon, 0, sizeof(anon));
+      memcpy(anon.id.pub_key, pub_key, PUB_KEY_SIZE);
+      anon.out_path_len = 0;   // default to zero-hop direct
+      anon.type = ADV_TYPE_NONE;  // unknown
+
+      if (addContact(anon)) recipient = &anon;
+    }
     uint8_t *data = &cmd_frame[1 + PUB_KEY_SIZE];
     if (recipient) {
       uint32_t tag, est_timeout;
@@ -1552,7 +1561,7 @@ void MyMesh::handleCmdFrame(size_t len) {
         _serial->writeFrame(out_frame, 10);
       }
     } else {
-      writeErrFrame(ERR_CODE_NOT_FOUND); // contact not found
+      writeErrFrame(ERR_CODE_TABLE_FULL); // contacts full
     }
   } else if (cmd_frame[0] == CMD_SEND_STATUS_REQ && len >= 1 + PUB_KEY_SIZE) {
     uint8_t *pub_key = &cmd_frame[1];
@@ -1983,6 +1992,14 @@ void MyMesh::handleCmdFrame(size_t len) {
   }
 }
 
+static bool save_filter(const ContactInfo& c) {
+  return c.type != ADV_TYPE_NONE;   // don't save the transient/anon entries
+}
+
+void MyMesh::saveContacts() {
+  _store->saveContacts(this, save_filter);
+}
+
 void MyMesh::enterCLIRescue() {
   _cli_rescue = true;
   cli_command[0] = 0;
@@ -2169,7 +2186,15 @@ void MyMesh::checkSerialInterface() {
              && !_serial->isWriteBusy() // don't spam the Serial Interface too quickly!
   ) {
     ContactInfo contact;
-    if (_iter.hasNext(this, contact)) {
+    bool found = false;
+    while (_iter.hasNext(this, contact)) {
+      if (contact.type != ADV_TYPE_NONE) {
+        found = true;
+        break;
+      }
+    }
+
+    if (found) {
       if (contact.lastmod > _iter_filter_since) { // apply the 'since' filter
         writeContactRespFrame(RESP_CODE_CONTACT, contact);
         if (contact.lastmod > _most_recent_lastmod) {
@@ -2221,4 +2246,9 @@ bool MyMesh::advert() {
   } else {
     return false;
   }
+}
+
+// To check if there is pending work
+bool MyMesh::hasPendingWork() const {
+  return _mgr->getOutboundTotal() > 0 || dirty_contacts_expiry != 0;
 }

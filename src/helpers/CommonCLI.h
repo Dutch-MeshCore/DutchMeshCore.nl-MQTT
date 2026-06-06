@@ -42,6 +42,8 @@ struct NodePrefs { // persisted to file
   uint8_t multi_acks;
   float bw;
   uint8_t flood_max;
+  uint8_t flood_max_unscoped;
+  uint8_t flood_max_advert;
   uint8_t interference_threshold;
   uint8_t agc_reset_interval; // secs / 4
   uint8_t path_hash_mode;   // which path mode to use when sending
@@ -104,6 +106,25 @@ struct NodePrefs { // persisted to file
   uint8_t snmp_enabled;          // boolean: 0=off, 1=on
   char snmp_community[24];       // community string (default "public")
   uint8_t radio_watchdog_minutes; // 0=disabled, 1-120 minutes
+
+  // Fault alert channel (LoRa group-channel "observer status" message on prolonged WiFi/MQTT outage).
+  // Sent over the radio (NOT over MQTT) so the alert still works while the MQTT path is broken.
+  // All fields are appended at the end of NodePrefs for binary-compatible upgrades.
+  uint8_t  alert_enabled;          // 0 = off (default), 1 = on
+  char     alert_psk_hex[33];      // 32 lowercase hex chars (16-byte channel secret) + null; empty = alerts disabled. Banned keys (Public/#test/#bot) are rejected.
+  uint16_t alert_wifi_minutes;     // WiFi-down threshold in minutes (0 = disabled), default 30
+  uint16_t alert_mqtt_minutes;     // MQTT-down threshold in minutes (0 = disabled), default 240 (4 h)
+  uint16_t alert_min_interval_min; // min minutes between alerts for the same fault, default 60, floor 60
+  // When the operator configures via `set alert.hashtag <name>`, we derive
+  // alert_psk_hex from sha256("#name")[0..15] once and remember the hashtag
+  // text here purely for `get alert.hashtag` readback. A subsequent
+  // `set alert.psk` clears this field so it doesn't lie about provenance.
+  char     alert_hashtag[24];
+  // Optional region name (e.g. "us", "eu"); empty = use the repeater's
+  // default_scope. Looked up lazily via RegionMap::findByNamePrefix at send
+  // time, so the operator can name a region that doesn't exist yet without
+  // polluting region_map state. Falls back to default_scope on miss.
+  char     alert_region[31];
 };
 
 #ifdef WITH_MQTT_BRIDGE
@@ -274,6 +295,24 @@ public:
   virtual void setRxBoostedGain(bool enable) {
     // no op by default
   };
+
+  // Fault-alert channel hooks (see NodePrefs::alert_*). The default no-op
+  // implementations keep CLI commands harmless on builds that don't wire up
+  // an AlertReporter.
+  virtual void onAlertConfigChanged() {
+    // no op by default
+  }
+  virtual bool sendAlertText(const char* /*text*/) {
+    return false; // no op by default
+  }
+  // Resolve the TransportKey scope to use for outgoing fault-alert floods.
+  // Implementations should consult NodePrefs::alert_region first (look up via
+  // RegionMap), then fall back to the repeater's default_scope, then return
+  // false if neither yields a usable key. AlertReporter falls back to an
+  // unscoped flood when this returns false.
+  virtual bool resolveAlertScope(TransportKey& /*dest*/) {
+    return false; // no op by default
+  }
 };
 
 class CommonCLI {

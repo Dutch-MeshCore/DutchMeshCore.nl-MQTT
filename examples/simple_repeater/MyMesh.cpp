@@ -467,7 +467,11 @@ void MyMesh::sendFloodReply(mesh::Packet* packet, unsigned long delay_millis, ui
 
 bool MyMesh::allowPacketForward(const mesh::Packet *packet) {
   if (_prefs.disable_fwd) return false;
-  if (packet->isRouteFlood() && packet->getPathHashCount() >= _prefs.flood_max) return false;
+  if (packet->isRouteFlood()) {
+    if (packet->getPathHashCount() >= _prefs.flood_max) return false;
+    if (packet->getRouteType() == ROUTE_TYPE_FLOOD && packet->getPathHashCount() >= _prefs.flood_max_unscoped) return false;
+    if (packet->getPayloadType() == PAYLOAD_TYPE_ADVERT && packet->getPathHashCount() >= _prefs.flood_max_advert) return false;
+  }
   if (packet->isRouteFlood() && recv_pkt_region == NULL) {
     MESH_DEBUG_PRINTLN("allowPacketForward: unknown transport code, or wildcard not allowed for FLOOD packet");
     return false;
@@ -691,7 +695,7 @@ void MyMesh::onAdvertRecv(mesh::Packet *packet, const mesh::Identity &id, uint32
   mesh::Mesh::onAdvertRecv(packet, id, timestamp, app_data, app_data_len); // chain to super impl
 
   // if this a zero hop advert (and not via 'Share'), add it to neighbours
-  if (packet->path_len == 0 && !isShare(packet)) {
+  if (packet->getPathHashCount() == 0 && !isShare(packet)) {
     AdvertDataParser parser(app_data, app_data_len);
     if (parser.isValid() && parser.getType() == ADV_TYPE_REPEATER) { // just keep neigbouring Repeaters
       putNeighbour(id, timestamp, packet->getSNR());
@@ -941,11 +945,27 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   _prefs.advert_interval = 1;        // default to 2 minutes for NEW installs
   _prefs.flood_advert_interval = 47; // 47 hours
   _prefs.flood_max = 64;
+  _prefs.flood_max_unscoped = 64;
+  _prefs.flood_max_advert = 8;
   _prefs.interference_threshold = 0; // disabled
 #ifdef WITH_MQTT_BRIDGE
   _prefs.agc_reset_interval = 7;    // 28 seconds (secs/4) — prevents AGC drift on long-running observers
 #endif
   _prefs.radio_watchdog_minutes = 5; // 5 minutes default
+
+  // Alert channel defaults — disabled by default, and the channel is left
+  // unconfigured so a freshly-flashed observer never broadcasts on the
+  // well-known Public hashtag. Operators must explicitly pick a private
+  // key (`set alert.psk`) or a hashtag (`set alert.hashtag`) before alerts
+  // can fire. The sender prefix on outgoing alert messages is always the
+  // node name (`set name ...`), so there's no separate `alert.name`.
+  _prefs.alert_enabled = 0;
+  _prefs.alert_psk_hex[0] = '\0';
+  _prefs.alert_hashtag[0] = '\0';
+  _prefs.alert_region[0] = '\0';      // empty = use default_scope
+  _prefs.alert_wifi_minutes = 30;     // 30 minutes
+  _prefs.alert_mqtt_minutes = 240;    // 4 hours
+  _prefs.alert_min_interval_min = 60; // re-arm window: 1 hour
 
   // bridge defaults
   _prefs.bridge_enabled = 1;    // enabled
@@ -965,21 +985,14 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   _prefs.gps_interval = 0;
   _prefs.advert_loc_policy = ADVERT_LOC_PREFS;
 
-  // MQTT defaults (mqtt_origin empty => effective origin follows node_name at publish time)
+  // MQTT slot/IATA/timezone defaults come from /mqtt_prefs via loadPrefs (see MQTTDefaults.h)
   _prefs.mqtt_origin[0] = '\0';
-  StrHelper::strncpy(_prefs.mqtt_iata, "SEA", sizeof(_prefs.mqtt_iata));
-  _prefs.mqtt_status_enabled = 1;    // enabled
-  _prefs.mqtt_packets_enabled = 1;   // enabled
-  _prefs.mqtt_raw_enabled = 0;       // disabled
-  _prefs.mqtt_tx_enabled = 2;        // advert: own adverts only (matches MQTTPrefs default)
-  _prefs.mqtt_rx_enabled = 1;        // RX packets enabled by default
-  _prefs.mqtt_status_interval = 300000; // 5 minutes
 
-  // WiFi defaults
+  // WiFi defaults (user-configured via CLI; placeholders until set)
   StrHelper::strncpy(_prefs.wifi_ssid, "ssid_here", sizeof(_prefs.wifi_ssid));
   StrHelper::strncpy(_prefs.wifi_password, "password_here", sizeof(_prefs.wifi_password));
 
-  // Timezone defaults (Pacific Time with DST support)
+  // Timezone defaults (Europe/Amsterdam with DST support)
   StrHelper::strncpy(_prefs.timezone_string, "Europe/Amsterdam", sizeof(_prefs.timezone_string));
   _prefs.timezone_offset = 1; // fallback
 
@@ -1074,6 +1087,15 @@ void MyMesh::begin(FILESYSTEM *fs) {
   }
 #endif
 
+  // Wire fault-alert reporter. begin() is safe regardless of bridge state.
+  // Passing `this` as the callbacks lets the reporter resolve a TransportKey
+  // scope (alert.region override, falling back to default_scope) so alert
+  // floods ride the same scope as adverts/channel messages.
+  _alerter.begin(&_prefs, this, this);
+#if defined(WITH_MQTT_BRIDGE)
+  _alerter.setBridge(bridge);
+#endif
+
   radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
   radio_driver.setTxPower(_prefs.tx_power_dbm);
 
@@ -1098,6 +1120,24 @@ void MyMesh::sendFloodScoped(const TransportKey& scope, mesh::Packet* pkt, uint3
     codes[1] = 0;  // REVISIT: set to 'home' Region, for sender/return region?
     sendFlood(pkt, codes, delay_millis, path_hash_size);
   }
+}
+
+bool MyMesh::resolveAlertScope(TransportKey& dest) {
+  // Prefer an explicit alert.region override; look it up lazily via
+  // RegionMap so the operator can name a region that doesn't exist yet
+  // without polluting region_map state — we just silently fall through
+  // to default_scope on miss.
+  if (_prefs.alert_region[0]) {
+    auto r = region_map.findByNamePrefix(_prefs.alert_region);
+    if (r && region_map.getTransportKeysFor(*r, &dest, 1) > 0 && !dest.isNull()) {
+      return true;
+    }
+  }
+  if (!default_scope.isNull()) {
+    dest = default_scope;
+    return true;
+  }
+  return false;
 }
 
 void MyMesh::applyTempRadioParams(float freq, float bw, uint8_t sf, uint8_t cr, int timeout_mins) {
@@ -1424,6 +1464,8 @@ void MyMesh::loop() {
   uint32_t now = millis();
   uptime_millis += now - last_millis;
   last_millis = now;
+
+  _alerter.onLoop(now);
 
 #ifdef WITH_SNMP
   // Push radio stats to SNMP agent every 2 seconds
