@@ -12,9 +12,11 @@
  * into JSON messages for MQTT publishing according to the MeshCore
  * packet capture specification.
  *
- * Timestamps in JSON use the configured Timezone (prefs) for status, packet, and
- * raw topics. Packet payloads also include separate `time` and `date` strings in
- * UTC (gmtime) so they stay aligned with meshcoretomqtt serial regex fields.
+ * Timestamps in the JSON `timestamp` field are emitted in UTC with an explicit
+ * "+00:00" offset (equivalent to Python datetime.now(timezone.utc).isoformat()) for
+ * status, packet, and raw topics. Packet payloads also include separate `time` and
+ * `date` strings in UTC (gmtime) so they stay aligned with meshcoretomqtt serial
+ * regex fields.
  */
 class MQTTMessageBuilder {
 private:
@@ -23,9 +25,10 @@ private:
 public:
   /**
    * Format the MQTT JSON `timestamp` field (same rule for status, packet, raw).
-   * Applies Timezone prefs via `timezone->toLocal(now)`; if timezone is nullptr,
-   * uses `now` unchanged. Output is naive local wall time, ISO-like
-   * "%Y-%m-%dT%H:%M:%S.000000".
+   * Always UTC with an explicit "+00:00" offset, ISO-8601
+   * "%Y-%m-%dT%H:%M:%S.000000+00:00" (matches Python
+   * datetime.now(timezone.utc).isoformat()). The `timezone` parameter is retained
+   * for API compatibility but ignored — the system clock is UTC.
    */
   static void formatIsoTimestampForMqtt(time_t now, Timezone* timezone, char* buffer, size_t buffer_size);
 

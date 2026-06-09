@@ -732,3 +732,26 @@ Observer nodes include an optional SNMP v2c agent that exposes radio stats, MQTT
 
 Fault alerts broadcast LoRa group-channel notifications when WiFi or configured MQTT links stay down past configured thresholds, with optional recovery notices and rate limiting to avoid spam.
 For configuration, CLI commands, examples, and operational notes, see [ALERTS.md](ALERTS.md).
+
+## Radio Watchdog
+
+The radio watchdog detects a LoRa radio that appears stuck in RX mode but has stopped seeing any activity (valid packets, radio interrupts, or successful TX). When the configured silence interval is exceeded, the firmware idles the radio and restarts receive mode. This helps long-running MQTT observers recover from conditions such as PSRAM starvation that can cause missed radio interrupts without a full reboot.
+
+Activity is tracked from the most recent of: a valid RX, any radio ISR (including CRC errors), or a successful TX. That composite timestamp reduces false recoveries on quiet meshes where legitimate packet gaps can exceed the watchdog interval.
+
+#### Get Commands
+- `get radio.watchdog` - Get watchdog interval in minutes (`0` = disabled)
+
+#### Set Commands
+- `set radio.watchdog <minutes>` - Set watchdog interval (`0` to disable, or `1-120`)
+
+**Default:** `5` minutes
+
+**Examples:**
+```bash
+get radio.watchdog
+set radio.watchdog 10    # 10-minute silence before recovery
+set radio.watchdog 0     # disable watchdog
+```
+
+On very quiet meshes where no traffic is expected for long periods, increase the interval or set `0` to disable the watchdog and avoid unnecessary radio recoveries.

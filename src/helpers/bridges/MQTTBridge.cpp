@@ -1706,11 +1706,11 @@ void MQTTBridge::publishStatusToSlot(int index) {
   #endif
 
   char origin_id[65];
-  char timestamp[32];
+  char timestamp[40];
   char radio_info[64];
 
-  // Status timestamp: same prefs-based wall clock as packet/raw JSON `timestamp`
-  // (not libc getLocalTime — SNTP uses UTC offset 0; prefs Timezone is separate).
+  // Status timestamp: UTC with explicit +00:00 offset, same as packet/raw JSON
+  // `timestamp` (system clock is UTC — SNTP offset 0; prefs Timezone is separate).
   MQTTMessageBuilder::formatIsoTimestampForMqtt(time(nullptr), _timezone, timestamp, sizeof(timestamp));
 
   snprintf(radio_info, sizeof(radio_info), "%.6f,%.1f,%d,%d",
@@ -2412,11 +2412,11 @@ bool MQTTBridge::publishStatus() {
   char* json_buffer = _status_json_buffer;
   #endif
   char origin_id[65];
-  char timestamp[32];
+  char timestamp[40];
   char radio_info[64];
 
-  // Status timestamp: same prefs-based wall clock as packet/raw JSON `timestamp`
-  // (not libc getLocalTime — SNTP uses UTC offset 0; prefs Timezone is separate).
+  // Status timestamp: UTC with explicit +00:00 offset, same as packet/raw JSON
+  // `timestamp` (system clock is UTC — SNTP offset 0; prefs Timezone is separate).
   MQTTMessageBuilder::formatIsoTimestampForMqtt(time(nullptr), _timezone, timestamp, sizeof(timestamp));
 
   snprintf(radio_info, sizeof(radio_info), "%.6f,%.1f,%d,%d",
@@ -3085,9 +3085,14 @@ void MQTTBridge::optimizeMqttClientConfig(PsychicMqttClient* client, bool needs_
   esp_mqtt_client_config_t* config = client->getMqttConfig();
   if (config) {
     #if defined(ESP_IDF_VERSION_MAJOR) && ESP_IDF_VERSION_MAJOR >= 5
-      if (config->buffer.out_size == 0 || config->buffer.out_size > MQTT_CLIENT_BUFFER_SIZE) {
-        config->buffer.out_size = MQTT_CLIENT_BUFFER_SIZE;
-      }
+      // Keep the output buffer (used to build the CONNECT/PUBLISH frames) in lockstep
+      // with the input buffer. setBufferSize() above only sets buffer.size, so out_size
+      // must be set here. The previous conditional only ever shrank out_size or set it
+      // from 0 — when a slot was reconfigured from a small non-JWT buffer (512) up to
+      // the JWT buffer (896), out_size stayed at 512 and the JWT CONNECT frame (username
+      // + ~537-768B token) overflowed it, producing esp-mqtt "Connect message cannot be
+      // created". Always matching MQTT_CLIENT_BUFFER_SIZE fixes the grow case.
+      config->buffer.out_size = MQTT_CLIENT_BUFFER_SIZE;
     #endif
   }
 }

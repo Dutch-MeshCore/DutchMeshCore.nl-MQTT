@@ -7,12 +7,15 @@
 
 void MQTTMessageBuilder::formatIsoTimestampForMqtt(time_t now, Timezone* timezone, char* buffer, size_t buffer_size) {
   if (!buffer || buffer_size == 0) return;
-  time_t local_wall = timezone ? timezone->toLocal(now) : now;
-  struct tm* tm_info = localtime(&local_wall);
-  if (tm_info && strftime(buffer, buffer_size, "%Y-%m-%dT%H:%M:%S.000000", tm_info) > 0) {
+  // Always emit UTC with an explicit "+00:00" offset, matching Python's
+  // datetime.now(timezone.utc).isoformat(). The system clock is UTC (SNTP offset 0),
+  // so gmtime() is correct regardless of the prefs Timezone (now unused here).
+  (void)timezone;
+  struct tm* tm_info = gmtime(&now);
+  if (tm_info && strftime(buffer, buffer_size, "%Y-%m-%dT%H:%M:%S.000000+00:00", tm_info) > 0) {
     return;
   }
-  strncpy(buffer, "2024-01-01T12:00:00.000000", buffer_size - 1);
+  strncpy(buffer, "2024-01-01T12:00:00.000000+00:00", buffer_size - 1);
   buffer[buffer_size - 1] = '\0';
 }
 
@@ -195,7 +198,7 @@ int MQTTMessageBuilder::buildPacketJSON(
   if (!packet) return 0;
   
   time_t now = time(nullptr);
-  char timestamp[32];
+  char timestamp[40];
   formatIsoTimestampForMqtt(now, timezone, timestamp, sizeof(timestamp));
   
   // Packet time/date: UTC (gmtime), same family as meshcoretomqtt serial fields
@@ -268,7 +271,7 @@ int MQTTMessageBuilder::buildPacketJSONFromRaw(
   if (!packet || !raw_data || raw_len <= 0) return 0;
   
   time_t now = time(nullptr);
-  char timestamp[32];
+  char timestamp[40];
   formatIsoTimestampForMqtt(now, timezone, timestamp, sizeof(timestamp));
   
   struct tm* utc_timeinfo = gmtime(&now);
@@ -334,7 +337,7 @@ int MQTTMessageBuilder::buildRawJSON(
   if (!packet) return 0;
   
   time_t now = time(nullptr);
-  char timestamp[32];
+  char timestamp[40];
   formatIsoTimestampForMqtt(now, timezone, timestamp, sizeof(timestamp));
   
   // Convert packet to hex

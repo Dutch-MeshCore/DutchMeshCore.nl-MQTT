@@ -126,8 +126,8 @@ build_firmware() {
   # get git commit sha
   COMMIT_HASH=$(git rev-parse --short HEAD)
 
-  # set firmware build date
-  FIRMWARE_BUILD_DATE=$(date '+%d-%b-%Y')
+  # set firmware build date (e.g. "6 Jun 2026"; %-d drops the leading zero on GNU date / the Linux CI runner)
+  FIRMWARE_BUILD_DATE=$(date '+%-d %b %Y')
 
   # get FIRMWARE_VERSION, which should be provided by the environment
   if [ -z "$FIRMWARE_VERSION" ]; then
@@ -135,7 +135,7 @@ build_firmware() {
     exit 1
   fi
 
-  # set firmware version string
+  # set firmware version string (used for the output filename)
   # e.g: v1.0.0-abcdef
   FIRMWARE_VERSION_STRING="${FIRMWARE_VERSION}-${COMMIT_HASH}"
 
@@ -143,8 +143,18 @@ build_firmware() {
   # e.g: RAK_4631_Repeater-v1.0.0-SHA
   FIRMWARE_FILENAME="$1-${FIRMWARE_VERSION_STRING}"
 
+  # Tag the *embedded* version for observer builds, e.g. v1.0.0-observer-abcdef,
+  # so `ver`, the MQTT firmware_version/client_version, and SNMP all identify the
+  # fork. The filename above is intentionally left untagged: the env name already
+  # contains "observer", and the web flasher keys off that existing pattern.
+  VARIANT_TAG=""
+  case "$1" in
+    *observer*) VARIANT_TAG="-observer" ;;
+  esac
+  EMBEDDED_VERSION_STRING="${FIRMWARE_VERSION}${VARIANT_TAG}-${COMMIT_HASH}"
+
   # add firmware version info to end of existing platformio build flags in environment vars
-  export PLATFORMIO_BUILD_FLAGS="${PLATFORMIO_BUILD_FLAGS} -DFIRMWARE_BUILD_DATE='\"${FIRMWARE_BUILD_DATE}\"' -DFIRMWARE_VERSION='\"${FIRMWARE_VERSION_STRING}\"'"
+  export PLATFORMIO_BUILD_FLAGS="${PLATFORMIO_BUILD_FLAGS} -DFIRMWARE_BUILD_DATE='\"${FIRMWARE_BUILD_DATE}\"' -DFIRMWARE_VERSION='\"${EMBEDDED_VERSION_STRING}\"'"
 
   # disable debug flags if requested
   disable_debug_flags
