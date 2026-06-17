@@ -46,6 +46,7 @@ uint32_t Dispatcher::getRadioWatchdogMillis() const {
 void Dispatcher::loop() {
   if (millisHasNowPassed(next_floor_calib_time)) {
     _radio->triggerNoiseFloorCalibrate(getInterferenceThreshold());
+    _radio->setCADEnabled(getCADEnabled());
     next_floor_calib_time = futureMillis(NOISE_FLOOR_CALIB_INTERVAL);
   }
   _radio->loop();

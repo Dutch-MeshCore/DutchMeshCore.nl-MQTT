@@ -63,6 +63,11 @@ struct NodePrefs { // persisted to file
   uint32_t discovery_mod_timestamp;
   float adc_multiplier;
   char owner_info[120];
+  uint8_t rx_boosted_gain; // power settings
+  uint8_t radio_fem_rxgain; // LoRa FEM RX gain setting
+  uint8_t path_hash_mode;   // which path mode to use when sending
+  uint8_t loop_detect;
+  uint8_t cad_enabled;      // hardware Channel Activity Detection before TX (boolean)
   // MQTT settings (stored separately in /mqtt_prefs, but kept here for backward compatibility)
   char mqtt_origin[32];     // Device name for MQTT topics
   char mqtt_iata[8];        // IATA code for MQTT topics
