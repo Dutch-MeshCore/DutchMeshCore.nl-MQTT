@@ -146,6 +146,20 @@ jobs:
             "${{ steps.sha.outputs.short }}" \
             "$GITHUB_WORKSPACE/firmware-notes.html"
 
+      - name: Sync Docs into Flasher
+        run: |
+          # docs.html on the flasher site serves these raw .md files and renders
+          # them client-side; keep this list in sync with LOCAL_DOCS in
+          # flasher/docs.html.
+          for f in MQTT_IMPLEMENTATION.md MQTT_SNMP.md ALERTS.md; do
+            if [ -f "$f" ]; then
+              cp -f "$f" "flasher/$f"
+              echo "synced $f"
+            else
+              echo "WARNING: source doc $f not found" >&2
+            fi
+          done
+
       - name: Commit & Push Flasher Config
         working-directory: flasher
         run: |

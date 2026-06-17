@@ -1,6 +1,7 @@
 #include "MQTTMessageBuilder.h"
 #include <ArduinoJson.h>
 #include <cstring>
+#include <math.h>
 #include <time.h>
 #include <Timezone.h>
 #include "MeshCore.h"
@@ -40,6 +41,8 @@ int MQTTMessageBuilder::buildStatusMessage(
   int rx_air_secs,
   int recv_errors,
   int internal_heap,
+  int packets_sent,
+  int packets_received,
   const char* repeat
 ) {
   // doc is provided by the caller (heap-allocated DynamicJsonDocument in MQTTBridge),
@@ -62,7 +65,7 @@ int MQTTMessageBuilder::buildStatusMessage(
   // Add stats object if any stats are provided
   if (battery_mv >= 0 || uptime_secs >= 0 || errors >= 0 || queue_len >= 0 ||
       noise_floor > -999 || tx_air_secs >= 0 || rx_air_secs >= 0 || recv_errors >= 0 ||
-      internal_heap >= 0) {
+      internal_heap >= 0 || packets_sent >= 0 || packets_received >= 0) {
     JsonObject stats = root.createNestedObject("stats");
     
     if (battery_mv >= 0) {
@@ -70,6 +73,12 @@ int MQTTMessageBuilder::buildStatusMessage(
     }
     if (uptime_secs >= 0) {
       stats["uptime_secs"] = uptime_secs;
+    }
+    if (packets_sent >= 0) {
+      stats["packets_sent"] = packets_sent;
+    }
+    if (packets_received >= 0) {
+      stats["packets_received"] = packets_received;
     }
     if (errors >= 0) {
       stats["errors"] = errors;
@@ -113,8 +122,11 @@ int MQTTMessageBuilder::buildPacketMessage(
   const char* raw,
   float snr,
   int rssi,
+  float score,
   const char* hash,
-  const char* path,
+  const uint8_t* path_bytes,
+  int path_hop_count,
+  int path_hash_size,
   char* buffer,
   size_t buffer_size
 ) {
@@ -129,7 +141,8 @@ int MQTTMessageBuilder::buildPacketMessage(
   char payload_len_str[16];
   char snr_str[16];
   char rssi_str[16];
-  
+  char score_str[16];
+
   snprintf(len_str, sizeof(len_str), "%d", len);
   snprintf(packet_type_str, sizeof(packet_type_str), "%d", packet_type);
   snprintf(payload_len_str, sizeof(payload_len_str), "%d", payload_len);
@@ -153,12 +166,33 @@ int MQTTMessageBuilder::buildPacketMessage(
   if (strcmp(direction, "rx") == 0) {
     root["SNR"] = snr_str;
     root["RSSI"] = rssi_str;
+    // Firmware's rebroadcast "score" for this RX packet, scaled x1000 to match the
+    // integer form printed in the serial RX log (see Dispatcher::checkRecv()).
+    if (!isnan(score)) {
+      snprintf(score_str, sizeof(score_str), "%d", (int)(score * 1000));
+      root["score"] = score_str;
+    }
   }
   
-  if (path && strlen(path) > 0) {
-    root["path"] = path;
+  // Routing path as an array of lowercase hex hop tokens, one element per hop
+  // (e.g. ["aa","bb","cc"], or ["aaaa","bbbb"] for multi-byte hashes). This matches
+  // meshcore-packet-capture's _split_path_hops() representation.
+  if (path_bytes && path_hop_count > 0 && path_hash_size > 0) {
+    JsonArray path_arr = root.createNestedArray("path");
+    char hop_hex[2 * 4 + 1]; // hop hash is 1-4 bytes -> up to 8 hex chars + null
+    for (int i = 0; i < path_hop_count; i++) {
+      size_t pos = 0;
+      for (int b = 0; b < path_hash_size && b < 4; b++) {
+        size_t idx = (size_t)i * path_hash_size + b;
+        if (idx >= MAX_PATH_SIZE) break;
+        snprintf(hop_hex + pos, 3, "%02x", path_bytes[idx]);
+        pos += 2;
+      }
+      hop_hex[pos] = '\0';
+      path_arr.add(hop_hex); // char[] (non-const) -> ArduinoJson copies the string
+    }
   }
-  
+
   size_t json_len = serializeJson(root, buffer, buffer_size);
   return (json_len > 0 && json_len < buffer_size) ? json_len : 0;
 }
@@ -230,12 +264,9 @@ int MQTTMessageBuilder::buildPacketJSON(
   packet->calculatePacketHash(packet_hash);
   bytesToHex(packet_hash, MAX_HASH_SIZE, hash_str, sizeof(hash_str));
   
-  // Build path string for direct packets (multibyte-path: show hash count, hash size, byte length)
-  char path_str[128] = "";
-  if (packet->isRouteDirect() && packet->path_len > 0) {
-    snprintf(path_str, sizeof(path_str), "path_%dx%d_%db",
-             (int)packet->getPathHashCount(), (int)packet->getPathHashSize(), (int)packet->getPathByteLen());
-  }
+  // Routing path (direct packets only): pass raw hop bytes to buildPacketMessage,
+  // which emits them as an array of lowercase hex hop tokens.
+  bool has_path = packet->isRouteDirect() && packet->getPathHashCount() > 0;
   
   return buildPacketMessage(
     doc,
@@ -248,8 +279,11 @@ int MQTTMessageBuilder::buildPacketJSON(
     raw_hex,
     12.5f, // SNR - using reasonable default
     -65,   // RSSI - using reasonable default
+    NAN,   // score - unknown on this reconstruction-less fallback path
     hash_str,
-    packet->isRouteDirect() ? path_str : nullptr,
+    has_path ? packet->path : nullptr,
+    has_path ? packet->getPathHashCount() : 0,
+    has_path ? packet->getPathHashSize() : 0,
     buffer, buffer_size
   );
 }
@@ -264,6 +298,7 @@ int MQTTMessageBuilder::buildPacketJSONFromRaw(
   const char* origin_id,
   float snr,
   float rssi,
+  float score,
   Timezone* timezone,
   char* buffer,
   size_t buffer_size
@@ -302,12 +337,9 @@ int MQTTMessageBuilder::buildPacketJSONFromRaw(
   packet->calculatePacketHash(packet_hash);
   bytesToHex(packet_hash, MAX_HASH_SIZE, hash_str, sizeof(hash_str));
   
-  // Build path string for direct packets (multibyte-path: show hash count, hash size, byte length)
-  char path_str[128] = "";
-  if (packet->isRouteDirect() && packet->path_len > 0) {
-    snprintf(path_str, sizeof(path_str), "path_%dx%d_%db",
-             (int)packet->getPathHashCount(), (int)packet->getPathHashSize(), (int)packet->getPathByteLen());
-  }
+  // Routing path (direct packets only): pass raw hop bytes to buildPacketMessage,
+  // which emits them as an array of lowercase hex hop tokens.
+  bool has_path = packet->isRouteDirect() && packet->getPathHashCount() > 0;
   
   return buildPacketMessage(
     doc,
@@ -320,8 +352,11 @@ int MQTTMessageBuilder::buildPacketJSONFromRaw(
     raw_hex,
     snr,  // Use actual SNR from radio
     rssi, // Use actual RSSI from radio
+    score, // Firmware rebroadcast score (NaN for tx / when unavailable)
     hash_str,
-    packet->isRouteDirect() ? path_str : nullptr,
+    has_path ? packet->path : nullptr,
+    has_path ? packet->getPathHashCount() : 0,
+    has_path ? packet->getPathHashSize() : 0,
     buffer, buffer_size
   );
 }

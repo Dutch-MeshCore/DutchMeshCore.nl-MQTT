@@ -5,6 +5,7 @@
 #include <WiFiUdp.h>
 #include <Timezone.h>
 #include <time.h>
+#include <math.h>
 
 #ifdef WITH_SNMP
 #include "../SNMPAgent.h"
@@ -1730,6 +1731,8 @@ void MQTTBridge::publishStatusToSlot(int index) {
   int tx_air_secs = -1;
   int rx_air_secs = -1;
   int recv_errors = -1;
+  int packets_sent = -1;
+  int packets_received = -1;
 
   if (_board) battery_mv = _board->getBattMilliVolts();
   if (_ms) uptime_secs = _ms->getMillis() / 1000;
@@ -1737,6 +1740,8 @@ void MQTTBridge::publishStatusToSlot(int index) {
     errors = _dispatcher->getErrFlags();
     tx_air_secs = _dispatcher->getTotalAirTime() / 1000;
     rx_air_secs = _dispatcher->getReceiveAirTime() / 1000;
+    packets_sent = (int)(_dispatcher->getNumSentFlood() + _dispatcher->getNumSentDirect());
+    packets_received = (int)(_dispatcher->getNumRecvFlood() + _dispatcher->getNumRecvDirect());
   }
   if (_radio) {
     noise_floor = (int16_t)_radio->getNoiseFloor();
@@ -1752,6 +1757,7 @@ void MQTTBridge::publishStatusToSlot(int index) {
     client_version, "online", timestamp, json_buffer, STATUS_JSON_BUFFER_SIZE,
     battery_mv, uptime_secs, errors, _queue_count, noise_floor,
     tx_air_secs, rx_air_secs, recv_errors, internal_heap_free,
+    packets_sent, packets_received,
     _prefs->disable_fwd ? "off" : "on"
   );
 
@@ -2436,6 +2442,8 @@ bool MQTTBridge::publishStatus() {
   int tx_air_secs = -1;
   int rx_air_secs = -1;
   int recv_errors = -1;
+  int packets_sent = -1;
+  int packets_received = -1;
 
   if (_board) battery_mv = _board->getBattMilliVolts();
   if (_ms) uptime_secs = _ms->getMillis() / 1000;
@@ -2443,6 +2451,8 @@ bool MQTTBridge::publishStatus() {
     errors = _dispatcher->getErrFlags();
     tx_air_secs = _dispatcher->getTotalAirTime() / 1000;
     rx_air_secs = _dispatcher->getReceiveAirTime() / 1000;
+    packets_sent = (int)(_dispatcher->getNumSentFlood() + _dispatcher->getNumSentDirect());
+    packets_received = (int)(_dispatcher->getNumRecvFlood() + _dispatcher->getNumRecvDirect());
   }
   if (_radio) {
     noise_floor = (int16_t)_radio->getNoiseFloor();
@@ -2458,6 +2468,7 @@ bool MQTTBridge::publishStatus() {
     client_version, "online", timestamp, json_buffer, STATUS_JSON_BUFFER_SIZE,
     battery_mv, uptime_secs, errors, _queue_count, noise_floor,
     tx_air_secs, rx_air_secs, recv_errors, internal_heap_free,
+    packets_sent, packets_received,
     _prefs->disable_fwd ? "off" : "on"
   );
 
@@ -2545,19 +2556,26 @@ bool MQTTBridge::publishPacket(mesh::Packet* packet, bool is_tx,
   strncpy(origin_id, _device_id, sizeof(origin_id) - 1);
   origin_id[sizeof(origin_id) - 1] = '\0';
 
+  // Firmware rebroadcast "score" for this packet — only meaningful for RX packets
+  // (depends on receive SNR). Recomputed here exactly as Dispatcher::checkRecv() does,
+  // via the radio's packetScore(snr, len); NaN signals "omit" (tx, or no radio).
+  // buildPacketMessage scales it x1000 to match the integer in the serial RX log.
+
   // Build packet message using raw radio data if provided
   int len;
   if (raw_data && raw_len > 0) {
+    float score = (_radio && !is_tx) ? _radio->packetScore(snr, raw_len) : NAN;
     len = MQTTMessageBuilder::buildPacketJSONFromRaw(
       _packet_json_doc,
       raw_data, raw_len, packet, is_tx, _origin, origin_id,
-      snr, rssi, _timezone, active_buffer, active_buffer_size
+      snr, rssi, score, _timezone, active_buffer, active_buffer_size
     );
   } else if (!is_tx && _last_raw_data && _last_raw_len > 0 && (millis() - _last_raw_timestamp) < 1000) {
+    float score = _radio ? _radio->packetScore(_last_snr, _last_raw_len) : NAN;
     len = MQTTMessageBuilder::buildPacketJSONFromRaw(
       _packet_json_doc,
       _last_raw_data, _last_raw_len, packet, is_tx, _origin, origin_id,
-      _last_snr, _last_rssi, _timezone, active_buffer, active_buffer_size
+      _last_snr, _last_rssi, score, _timezone, active_buffer, active_buffer_size
     );
   } else {
     // Reconstruct wire-format bytes from packet (same as MQTTMessageBuilder::packetToHex).
@@ -2566,10 +2584,11 @@ bool MQTTBridge::publishPacket(mesh::Packet* packet, bool is_tx,
     uint8_t reconstructed[512];
     uint8_t rlen = packet->writeTo(reconstructed);
     if (rlen > 0) {
+      float score = (_radio && !is_tx) ? _radio->packetScore(snr, rlen) : NAN;
       len = MQTTMessageBuilder::buildPacketJSONFromRaw(
         _packet_json_doc,
         reconstructed, rlen, packet, is_tx, _origin, origin_id,
-        snr, rssi, _timezone, active_buffer, active_buffer_size
+        snr, rssi, score, _timezone, active_buffer, active_buffer_size
       );
     } else {
       len = MQTTMessageBuilder::buildPacketJSON(
