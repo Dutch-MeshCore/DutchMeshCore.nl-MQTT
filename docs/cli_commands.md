@@ -19,6 +19,8 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
   - [GPS](#gps-when-gps-support-is-compiled-in)
   - [Sensors](#sensors-when-sensor-support-is-compiled-in)
   - [Bridge](#bridge-when-bridge-support-is-compiled-in)
+  - [MQTT Observer Firmware](#mqtt-observer-firmware-when-mqtt-bridge-support-is-compiled-in)
+  - [SNMP](#snmp-when-snmp-support-is-compiled-in)
 
 ---
 
@@ -386,6 +388,11 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 
 #### View this node's public key
 **Usage:** `get public.key`
+
+---
+
+#### View this node's firmware version
+**Usage:** `ver`
 
 ---
 
@@ -1076,6 +1083,300 @@ region save
 
 ---
 
+### MQTT Observer Firmware (When MQTT bridge support is compiled in)
+
+MQTT observer builds add WiFi connectivity and MQTT packet uplinking to repeater and room server firmware.
+
+#### Quick first-time setup
+**Usage:**
+```bash
+set radio 910.525,62.5,7,5
+set tx 22
+set name MyObserver
+set mqtt.iata SEA
+set wifi.ssid YourWiFiNetwork
+set wifi.pwd YourWiFiPassword
+reboot
+```
+
+**Optional receive-only observer:**
+```bash
+set repeat off
+```
+
+**Verify:**
+```bash
+get bridge.enabled
+get mqtt.rx
+get mqtt.tx
+get mqtt.origin
+get mqtt.iata
+get mqtt1.preset
+get mqtt2.preset
+get mqtt.status
+get wifi.status
+```
+
+---
+
+#### View available MQTT presets
+**Usage:**
+- `get mqtt.presets`
+- `get mqtt.presets <start>`
+
+**Parameters:**
+- `start`: Optional index returned as `next:<idx>` when the preset list is paginated
+
+**Available presets include:** `analyzer-us`, `analyzer-eu`, `meshmapper`, `meshrank`, `waev`, `meshomatic`, `cascadiamesh`, `tennmesh`, `nashmesh`, `chimesh`, `meshat.se`, `eastidahomesh`, `dutchmeshcore-1`, `dutchmeshcore-2`, `coloradomesh`, `custom`, `none`
+
+---
+
+#### View or change an MQTT slot preset
+**Usage:**
+- `get mqttN.preset`
+- `set mqttN.preset <preset>`
+
+**Parameters:**
+- `N`: Slot number (`1`-`6`)
+- `preset`: Preset name, such as `dutchmeshcore-1`, `dutchmeshcore-2`, `meshmapper`, `meshrank`, `custom`, or `none`
+
+**DutchMeshCore presets:**
+- `set mqttN.preset dutchmeshcore-1`: Use `wss://collector1.dutchmeshcore.nl:443/mqtt`
+- `set mqttN.preset dutchmeshcore-2`: Use `wss://collector2.dutchmeshcore.nl:443/mqtt`
+
+**Default for this firmware:** Slot 1 and slot 2 are DutchMeshCore presets. Slot 1 is `dutchmeshcore-1`, slot 2 is `dutchmeshcore-2`, and slots 3-6 are `none`.
+
+---
+
+#### View or change custom MQTT slot settings
+**Usage:**
+- `get mqttN.server`
+- `set mqttN.server <hostname-or-url>`
+- `get mqttN.port`
+- `set mqttN.port <port>`
+- `get mqttN.username`
+- `set mqttN.username <username>`
+- `get mqttN.password`
+- `set mqttN.password <password>`
+- `get mqttN.token`
+- `set mqttN.token <token>`
+- `get mqttN.topic`
+- `set mqttN.topic <template>`
+- `get mqttN.audience`
+- `set mqttN.audience <audience>`
+- `set mqttN.audience`
+
+**Parameters:**
+- `N`: Slot number (`1`-`6`)
+- `port`: Port number (`1`-`65535`)
+- `token`: Per-slot token, used by presets such as `meshrank`
+- `template`: Custom topic template; only applies when the slot preset is `custom`
+- `audience`: JWT audience for custom broker Ed25519 JWT authentication
+
+**Notes:**
+- Custom server, port, username, password, topic, and audience settings only apply when the slot preset is `custom`.
+- `set mqttN.audience` without a value clears the audience and returns the slot to username/password authentication.
+
+---
+
+#### Configure MeshRank on a slot
+**Usage:**
+```bash
+set mqtt3.preset meshrank
+set mqtt3.token <meshrank_token>
+```
+
+**Note:** MeshRank requires a token and receives packet data only.
+
+---
+
+#### Configure a custom broker
+**Usage:**
+```bash
+set mqtt3.preset custom
+set mqtt3.server your-broker.example.com
+set mqtt3.port 1883
+set mqtt3.username your-username
+set mqtt3.password your-password
+```
+
+**JWT custom broker example:**
+```bash
+set mqtt3.preset custom
+set mqtt3.server wss://my-broker.example.com:443/mqtt
+set mqtt3.port 443
+set mqtt3.audience my-broker.example.com
+```
+
+**Custom topic example:**
+```bash
+set mqtt3.preset custom
+set mqtt3.server my-broker.local
+set mqtt3.port 1883
+set mqtt3.topic mynetwork/{device}/{type}
+```
+
+**Topic placeholders:**
+- `{iata}`: IATA airport code configured by `set mqtt.iata`
+- `{device}`: Device public key
+- `{token}`: Per-slot token from `mqttN.token`
+- `{type}`: Message type: `status`, `packets`, or `raw`
+
+**Default custom topic:** `meshcore/{iata}/{device}/{type}`
+
+---
+
+#### View or change MQTT shared settings
+**Usage:**
+- `get mqtt.origin`
+- `set mqtt.origin <name>`
+- `get mqtt.iata`
+- `set mqtt.iata <code>`
+- `get mqtt.status`
+- `set mqtt.status <on|off>`
+- `get mqtt.packets`
+- `set mqtt.packets <on|off>`
+- `get mqtt.raw`
+- `set mqtt.raw <on|off>`
+- `get mqtt.interval`
+- `set mqtt.interval <minutes>`
+- `get mqtt.owner`
+- `set mqtt.owner <64-hex-char-public-key>`
+- `get mqtt.email`
+- `set mqtt.email <email>`
+
+**Parameters:**
+- `code`: IATA airport code; auto-uppercased
+- `minutes`: Status publish interval (`1`-`60`)
+
+**Serial Only:**
+- `get mqtt.owner`: Yes
+- `get mqtt.email`: Yes
+
+**Defaults:**
+- `mqtt.status`: `on`
+- `mqtt.packets`: `on`
+- `mqtt.raw`: `off`
+- `mqtt.interval`: 5 minutes
+
+---
+
+#### View or change WiFi settings
+**Usage:**
+- `get wifi.ssid`
+- `set wifi.ssid <ssid>`
+- `get wifi.pwd`
+- `set wifi.pwd <password>`
+- `get wifi.status`
+- `get wifi.powersave`
+- `set wifi.powersave <none|min|max>`
+
+**Parameters:**
+- `none`: No WiFi power saving
+- `min`: Minimum WiFi power saving
+- `max`: Maximum WiFi power saving
+
+**Default:** `none`
+
+---
+
+#### View or change timezone settings
+**Usage:**
+- `get timezone`
+- `set timezone <string>`
+- `get timezone.offset`
+- `set timezone.offset <offset>`
+
+**Parameters:**
+- `string`: IANA timezone (`Europe/Amsterdam`), abbreviation (`CET`), or UTC offset (`UTC+1`)
+- `offset`: Fallback offset in hours (`-12` to `+14`)
+
+---
+
+#### MQTT observer build targets
+**Usage:**
+```bash
+pio run -e Heltec_v3_repeater_observer_mqtt
+pio run -e heltec_v4_repeater_observer_mqtt
+pio run -e Station_G2_repeater_observer_mqtt
+pio run -e LilyGo_TLora_V2_1_1_6_repeater_observer_mqtt
+pio run -e LilyGo_TLora_V2_1_1_6_room_server_observer_mqtt
+```
+
+**Build flags:**
+- `WITH_MQTT_BRIDGE=1`: Enable MQTT bridge support
+- `WITH_SNMP=1`: Enable optional SNMP monitoring on supported observer builds
+
+---
+
+#### MQTT observer flashing notes
+
+Some MQTT observer builds use larger app partitions for MQTT, TLS, and certificate bundle support. When a board's partition table changes, flash the merged firmware (`*-merged.bin`) the first time so the bootloader and partition table are written together.
+
+| Environment | Partition table | Flash size | App slot size | Notes |
+|---|---|---:|---:|---|
+| `LilyGo_T3S3_sx1262_repeater_observer_mqtt` | `min_spiffs.csv` | 4 MB | 1.875 MB | Changed from default |
+| `LilyGo_T3S3_sx1262_room_server_observer_mqtt` | `min_spiffs.csv` | 4 MB | 1.875 MB | Changed from default |
+| `LilyGo_TLora_V2_1_1_6_repeater_observer_mqtt` | `min_spiffs.csv` | 4 MB | 1.875 MB | TTGO LoRa32 V1.0; observer env omits `sensor_base` |
+| `LilyGo_TLora_V2_1_1_6_room_server_observer_mqtt` | `min_spiffs.csv` | 4 MB | 1.875 MB | Same as repeater observer |
+| `Station_G2_repeater_observer_mqtt` | `default_16MB.csv` | 16 MB | 6.25 MB | 16 MB flash board |
+| `Station_G2_room_server_observer_mqtt` | `default_16MB.csv` | 16 MB | 6.25 MB | 16 MB flash board |
+
+**Merged firmware example:**
+```bash
+pio run -t mergebin -e LilyGo_T3S3_sx1262_repeater_observer_mqtt
+esptool.py write_flash 0x0 .pio/build/LilyGo_T3S3_sx1262_repeater_observer_mqtt/firmware-merged.bin
+```
+
+**Note:** If the partition layout changes, stored settings in NVS are typically wiped or invalidated. Expect to reconfigure admin preferences, WiFi, MQTT slots, device name, and related settings.
+
+---
+
+#### MQTT topics
+
+| Type | Topic |
+|---|---|
+| Status | `meshcore/{IATA}/{DEVICE_PUBLIC_KEY}/status` |
+| Packets | `meshcore/{IATA}/{DEVICE_PUBLIC_KEY}/packets` |
+| Raw | `meshcore/{IATA}/{DEVICE_PUBLIC_KEY}/raw` |
+
+**Note:** `{DEVICE_PUBLIC_KEY}` is the device public key as 64 hexadecimal characters.
+
+---
+
+#### MQTT troubleshooting
+
+**WiFi issues:**
+```bash
+get wifi.ssid
+get wifi.pwd
+get wifi.status
+set wifi.powersave none
+reboot
+```
+
+**No MQTT messages appearing:**
+```bash
+get bridge.enabled
+set bridge.enabled on
+get mqtt.rx
+set mqtt.rx on
+get mqtt.tx
+get mqtt.status
+get mqtt1.preset
+get mqtt2.preset
+get mqtt.iata
+```
+
+**Timezone issues:**
+```bash
+get timezone
+set timezone Europe/Amsterdam
+set timezone.offset 1
+```
+
+---
+
 #### View or change the speed of the bridge (RS-232 only)
 **Usage:**
 - `get bridge.baud`
@@ -1138,5 +1439,41 @@ region save
 **Usage:** `get pwrmgt.bootmv`
 
 **Note:** Returns an error on boards without power management support.
+
+---
+
+### SNMP (When SNMP support is compiled in)
+
+SNMP observer builds expose read-only SNMP v2c monitoring for radio statistics, MQTT connectivity, memory usage, and WiFi RSSI.
+
+#### View or change SNMP state
+**Usage:**
+- `get snmp`
+- `set snmp <on|off>`
+
+**Default:** `off`
+
+**Note:** Restart required after changing.
+
+---
+
+#### View or change SNMP community string
+**Usage:**
+- `get snmp.community`
+- `set snmp.community <string>`
+
+**Default:** `public`
+
+**Note:** Restart required after changing.
+
+---
+
+#### Poll SNMP from a host on the same network
+**Usage:**
+```bash
+snmpwalk -v2c -c public <device-ip> 1.3.6.1.4.1.99999
+```
+
+**Note:** The SNMP agent listens on UDP port 161 and uses the private enterprise subtree `1.3.6.1.4.1.99999`.
 
 ---

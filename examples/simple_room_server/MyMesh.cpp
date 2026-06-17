@@ -705,6 +705,15 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   StrHelper::strncpy(_prefs.wifi_ssid, "ssid_here", sizeof(_prefs.wifi_ssid));
   StrHelper::strncpy(_prefs.wifi_password, "password_here", sizeof(_prefs.wifi_password));
 
+  // Timezone defaults (same as repeater - Europe/Amsterdam with DST support)
+  StrHelper::strncpy(_prefs.timezone_string, "Europe/Amsterdam", sizeof(_prefs.timezone_string));
+  _prefs.timezone_offset = 1; // fallback
+
+  // MQTT slot presets (dutchmeshcore-1 and dutchmeshcore-2 enabled by default)
+  StrHelper::strncpy(_prefs.mqtt_slot_preset[0], "dutchmeshcore-1", sizeof(_prefs.mqtt_slot_preset[0]));
+  StrHelper::strncpy(_prefs.mqtt_slot_preset[1], "dutchmeshcore-2", sizeof(_prefs.mqtt_slot_preset[1]));
+  StrHelper::strncpy(_prefs.mqtt_slot_preset[2], "none", sizeof(_prefs.mqtt_slot_preset[2]));
+
   next_post_idx = 0;
   next_client_idx = 0;
   next_push = 0;

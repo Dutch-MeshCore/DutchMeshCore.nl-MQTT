@@ -68,7 +68,7 @@ get mqtt.status
 **That's it!** The device will now:
 - Connect to WiFi automatically
 - Start uplinking mesh packets to configured MQTT brokers
-- By default, publish to Let's Mesh Analyzer US (slot 1) and EU (slot 2)
+- By default, publish to the DutchMeshCore presets: `dutchmeshcore-1` in slot 1 and `dutchmeshcore-2` in slot 2
 - Use device name as MQTT origin (set automatically)
 
 ---
@@ -110,6 +110,8 @@ The MQTT bridge uses a slot-based architecture with up to 6 concurrent connectio
 | `chimesh` | wss://mqtt.chimesh.org:443 | JWT (Ed25519) | WSS |
 | `meshat.se` | meshcore-mqtt.meshat.se:443 | JWT (Ed25519) | WSS |
 | `eastidahomesh` | wss://broker.eastidahomesh.net:443 | None | WSS |
+| `dutchmeshcore-1` | wss://collector1.dutchmeshcore.nl:443 | JWT (Ed25519) | WSS |
+| `dutchmeshcore-2` | wss://collector2.dutchmeshcore.nl:443 | JWT (Ed25519) | WSS |
 | `coloradomesh` | wss://mqtt.meshcore.coloradomesh.org:1883 | JWT (Ed25519) | WSS |
 | `dutchmeshcore-1` | collector1.dutchmeshcore.nl:443 | JWT (Ed25519) | WSS |
 | `dutchmeshcore-2` | collector2.dutchmeshcore.nl:443 | JWT (Ed25519) | WSS |
@@ -121,8 +123,8 @@ The MQTT bridge uses a slot-based architecture with up to 6 concurrent connectio
 | `none` | (disabled) | — | — |
 
 **Default Configuration:**
-- Slot 1: `analyzer-us`
-- Slot 2: `analyzer-eu`
+- Slot 1: `dutchmeshcore-1` (DutchMeshCore preset)
+- Slot 2: `dutchmeshcore-2` (DutchMeshCore preset)
 - Slots 3-6: `none`
 
 **Memory Limits:**
@@ -252,8 +254,8 @@ The MQTT bridge comes with the following defaults for fresh installs (unless ove
 - **RX Packets**: Enabled (uplink received packets)
 - **TX Packets**: `advert` by default (uplink this node's own adverts; set to `on` for all TX or `off` to disable)
 - **Status Interval**: 5 minutes (300000 ms)
-- **Slot 1**: `analyzer-us`
-- **Slot 2**: `analyzer-eu`
+- **Slot 1**: `dutchmeshcore-1` (DutchMeshCore preset)
+- **Slot 2**: `dutchmeshcore-2` (DutchMeshCore preset)
 - **Slots 3-6**: `none` (disabled)
 - **WiFi SSID**: (blank — must be configured)
 - **WiFi Password**: (blank — optional for open networks)
@@ -284,6 +286,23 @@ Each slot (1-6) supports the following commands:
 - `set mqttN.preset <name>` - Set slot N to a built-in preset. Use any `name` from the [preset table](#slot-based-preset-system) (run `get mqtt.presets` on-device for the full list). Most presets need no further configuration; the exceptions are:
   - `meshrank` - requires a per-slot token (`set mqttN.token <token>`)
   - `inwmesh` - requires per-slot credentials (`set mqttN.username` / `set mqttN.password`)
+- `set mqttN.preset analyzer-us` - Set slot N to LetsMesh Analyzer US
+- `set mqttN.preset analyzer-eu` - Set slot N to LetsMesh Analyzer EU
+- `set mqttN.preset nz-analyzer` - Set slot N to NZ Analyzer (Baird)
+- `set mqttN.preset meshmapper` - Set slot N to MeshMapper
+- `set mqttN.preset meshrank` - Set slot N to MeshRank (requires token)
+- `set mqttN.preset waev` - Set slot N to Waev
+- `set mqttN.preset meshomatic` - Set slot N to Meshomatic
+- `set mqttN.preset cascadiamesh` - Set slot N to CascadiaMesh
+- `set mqttN.preset tennmesh` - Set slot N to TennMesh (plain MQTT; same `meshcore/{iata}/...` topics as Analyzer US)
+- `set mqttN.preset nashmesh` - Set slot N to NashMesh
+- `set mqttN.preset chimesh` - Set slot N to ChicagolandMesh
+- `set mqttN.preset meshat.se` - Set slot N to Meshat.se
+- `set mqttN.preset eastidahomesh` - Set slot N to EastIdahoMesh (WSS/TLS, no auth; packets on `meshcore/{IATA}/{PUBLIC_KEY}/packets`)
+- `set mqttN.preset dutchmeshcore-1` - Set slot N to DutchMeshcore-1
+- `set mqttN.preset dutchmeshcore-2` - Set slot N to DutchMeshcore-2
+- `set mqttN.preset coloradomesh` - Set slot N to ColoradoMesh
+- `set mqttN.preset inwmesh` - Set slot N to INW Mesh Scope (`mqtts://scope.inwmesh.org:8883`; set `mqttN.username` and `mqttN.password`)
 - `set mqttN.preset custom` - Set slot N to custom broker (configure server/port/username/password)
 - `set mqttN.preset none` - Disable slot N
 - `set mqttN.server <hostname>` - Set custom server hostname for slot N
@@ -684,8 +703,8 @@ set repeat off
 
 ### Step 6: Verify Slot Configuration
 ```
-get mqtt1.preset    # Should show: analyzer-us
-get mqtt2.preset    # Should show: analyzer-eu
+get mqtt1.preset    # Should show: dutchmeshcore-1
+get mqtt2.preset    # Should show: dutchmeshcore-2
 get mqtt3.preset    # Should show: none
 ```
 

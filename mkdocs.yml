@@ -1,9 +1,9 @@
 site_name: MeshCore Docs
-site_url: https://meshcore-dev.github.io/meshcore/
+site_url: https://docs.meshcore.nz/
 site_description: Documentation for the open source MeshCore firmware
 
-repo_name: meshcore-dev/meshcore
-repo_url: https://github.com/meshcore-dev/meshcore/
+repo_name: Dutch-MeshCore/DutchMeshCore.nl-MQTT
+repo_url: https://github.com/Dutch-MeshCore/DutchMeshCore.nl-MQTT/
 edit_uri: edit/main/docs/
 
 theme:

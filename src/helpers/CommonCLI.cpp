@@ -472,7 +472,25 @@ void CommonCLI::savePrefs(FILESYSTEM* fs) {
 #ifdef WITH_MQTT_BRIDGE
 // Set default values for MQTT preferences (used when file doesn't exist or is corrupted)
 static void setMQTTPrefsDefaults(MQTTPrefs* prefs) {
-  applyMQTTDefaults(prefs);
+  memset(prefs, 0, sizeof(MQTTPrefs));
+  // Set sensible defaults matching MQTTBridge expectations
+  prefs->mqtt_status_enabled = 1;    // enabled by default
+  prefs->mqtt_packets_enabled = 1;   // enabled by default
+  prefs->mqtt_raw_enabled = 0;       // disabled by default
+  prefs->mqtt_tx_enabled = 2;        // advert: own adverts only, by default
+  prefs->mqtt_rx_enabled = 1;        // RX packets enabled by default
+  prefs->mqtt_status_interval = 300000; // 5 minutes default
+  // Slot presets: dutchmeshcore-1 and dutchmeshcore-2 enabled by default, rest = none
+  strncpy(prefs->mqtt_slot_preset[0], "dutchmeshcore-1", sizeof(prefs->mqtt_slot_preset[0]) - 1);
+  prefs->mqtt_slot_preset[0][sizeof(prefs->mqtt_slot_preset[0]) - 1] = '\0';
+  strncpy(prefs->mqtt_slot_preset[1], "dutchmeshcore-2", sizeof(prefs->mqtt_slot_preset[1]) - 1);
+  prefs->mqtt_slot_preset[1][sizeof(prefs->mqtt_slot_preset[1]) - 1] = '\0';
+  for (int i = 2; i < MAX_MQTT_SLOTS; i++) {
+    strncpy(prefs->mqtt_slot_preset[i], "none", sizeof(prefs->mqtt_slot_preset[i]) - 1);
+    prefs->mqtt_slot_preset[i][sizeof(prefs->mqtt_slot_preset[i]) - 1] = '\0';
+  }
+  prefs->wifi_power_save = 1; // Default to none (0=min, 1=none, 2=max)
+  // String fields are already zero-initialized by memset
 }
 
 void CommonCLI::loadMQTTPrefs(FILESYSTEM* fs) {
