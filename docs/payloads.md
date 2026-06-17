@@ -12,7 +12,6 @@ Inside each [MeshCore Packet](./packet_format.md) is a payload, identified by th
 * Group text message (unverified).
 * Group datagram (unverified).
 * Multi-part packet
-* Control data packet
 * Custom packet (raw bytes, custom encryption).
 
 This document defines the structure of each of these payload types.
@@ -166,7 +165,7 @@ Response contents are opaque application data. There is no single generic respon
 | txt_type + attempt | 1               | upper six bits are txt_type (see below), lower two bits are attempt number (0..3) |
 | message            | rest of payload | the message content, see next table                                               |
 
-txt_type
+Flags
 
 | Value  | Description               | Message content                                                          |
 |--------|---------------------------|--------------------------------------------------------------------------|
@@ -183,20 +182,13 @@ txt_type
 | cipher MAC       | 2               | MAC for encrypted data in next field      |
 | ciphertext       | rest of payload | encrypted message, see below for details  |
 
-## Room server login
+Plaintext message
 
 | Field          | Size (bytes)    | Description                                                                   |
 |----------------|-----------------|-------------------------------------------------------------------------------|
-| timestamp      | 4               | sender time (unix timestamp)                                                  |
-| sync timestamp | 4               | sender's "sync messages SINCE x" timestamp                                    |
-| password       | rest of message | password for room                                                             |
-
-## Repeater/Sensor login
-
-| Field          | Size (bytes)    | Description                                                                   |
-|----------------|-----------------|-------------------------------------------------------------------------------|
-| timestamp      | 4               | sender time (unix timestamp)                                                  |
-| password       | rest of message | password for repeater/sensor                                                  |
+| timestamp      | 4               | send time (unix timestamp)                                                    |
+| sync timestamp | 4               | NOTE: room server only! - sender's "sync messages SINCE x" timestamp |
+| password       | rest of message | password for repeater/room                                                    |
 
 ## Repeater - Regions request
 
@@ -253,31 +245,7 @@ The data contained in the ciphertext uses the format below:
 | data      | rest of payload | (depends on data type)                                   |
 
 
-# Control data
-
-| Field        | Size (bytes)    | Description                                |
-|--------------|-----------------|--------------------------------------------|
-| flags        | 1               | upper 4 bits is sub_type                   |
-| data         | rest of payload | typically unencrypted data                 |
-
-## DISCOVER_REQ (sub_type)
-
-| Field        | Size (bytes)    | Description                                  |
-|--------------|-----------------|----------------------------------------------|
-| flags        | 1               | 0x8 (upper 4 bits), prefix_only (lowest bit) |
-| type_filter  | 1               | bit for each ADV_TYPE_*                      |
-| tag          | 4               | randomly generate by sender                  |
-| since        | 4               | (optional) epoch timestamp (0 by default)    |
-
-## DISCOVER_RESP (sub_type)
-
-| Field        | Size (bytes)    | Description                                |
-|--------------|-----------------|--------------------------------------------|
-| flags        | 1               | 0x9 (upper 4 bits), node_type (lower 4)    |
-| snr          | 1               | signed, SNR*4                              |
-| tag          | 4               | reflected back from DISCOVER_REQ           |
-| pubkey       | 8 or 32         | node's ID (or prefix)                      |
-
+TODO: describe what datagram looks like
 
 # Custom packet
 
