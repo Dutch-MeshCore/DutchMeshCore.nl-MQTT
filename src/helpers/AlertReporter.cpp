@@ -26,6 +26,13 @@
 #define ALERT_DEBUG_PRINTLN(...) do {} while (0)
 #endif
 
+// Uplink name used in the network fault alert texts
+#ifdef ETHERNET_ENABLED
+#define NET_ALERT_LABEL "Ethernet"
+#else
+#define NET_ALERT_LABEL "WiFi"
+#endif
+
 AlertReporter::AlertReporter()
     : _prefs(nullptr), _mesh(nullptr), _callbacks(nullptr),
 #ifdef WITH_MQTT_BRIDGE
@@ -236,9 +243,9 @@ void AlertReporter::onLoop(unsigned long now_ms) {
         uint8_t reason = MQTTBridge::getLastWifiDisconnectReason();
         char text[80];
         if (reason != 0) {
-          snprintf(text, sizeof(text), "WiFi down %s (reason %u)", age, (unsigned)reason);
+          snprintf(text, sizeof(text), NET_ALERT_LABEL " down %s (reason %u)", age, (unsigned)reason);
         } else {
-          snprintf(text, sizeof(text), "WiFi down %s", age);
+          snprintf(text, sizeof(text), NET_ALERT_LABEL " down %s", age);
         }
         if (sendChannel(text)) {
           _wifi.state = FIRING;
@@ -253,7 +260,7 @@ void AlertReporter::onLoop(unsigned long now_ms) {
         char age[16];
         formatAge(total, age, sizeof(age));
         char text[80];
-        snprintf(text, sizeof(text), "WiFi recovered after %s", age);
+        snprintf(text, sizeof(text), NET_ALERT_LABEL " recovered after %s", age);
         sendChannel(text);
         _wifi.state = OK;
       }

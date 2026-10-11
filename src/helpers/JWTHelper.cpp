@@ -1,9 +1,11 @@
+#ifdef WITH_MQTT_BRIDGE
+
 #include "JWTHelper.h"
 #include <ArduinoJson.h>
 #include <SHA256.h>
 #include <string.h>
+#include <time.h>
 #include "ed_25519.h"
-#include "mbedtls/base64.h"
 
 // Base64 URL encoding table (without padding)
 static const char base64url_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -111,29 +113,35 @@ size_t JWTHelper::base64UrlEncode(const uint8_t* input, size_t inputLen, char* o
   if (!input || !output || outputSize == 0) {
     return 0;
   }
-  
-  size_t outlen = 0;
-  int ret = mbedtls_base64_encode((unsigned char*)output, outputSize - 1, &outlen, input, inputLen);
-  
-  if (ret != 0) {
+
+  // Unpadded base64url output length (portable; no mbedTLS dependency so nRF52 builds can use it)
+  size_t outlen = (inputLen / 3) * 4 + ((inputLen % 3) ? (inputLen % 3) + 1 : 0);
+  if (outlen >= outputSize) {
     return 0;
   }
-  
-  // Convert to base64 URL format in-place (replace + with -, / with _, remove padding =)
-  for (size_t i = 0; i < outlen; i++) {
-    if (output[i] == '+') {
-      output[i] = '-';
-    } else if (output[i] == '/') {
-      output[i] = '_';
-    }
+
+  size_t o = 0;
+  size_t i = 0;
+  while (i + 2 < inputLen) {
+    uint32_t v = ((uint32_t)input[i] << 16) | ((uint32_t)input[i + 1] << 8) | input[i + 2];
+    output[o++] = base64url_chars[(v >> 18) & 0x3F];
+    output[o++] = base64url_chars[(v >> 12) & 0x3F];
+    output[o++] = base64url_chars[(v >> 6) & 0x3F];
+    output[o++] = base64url_chars[v & 0x3F];
+    i += 3;
   }
-  
-  // Remove padding '=' characters
-  while (outlen > 0 && output[outlen-1] == '=') {
-    outlen--;
+  if (inputLen - i == 1) {
+    uint32_t v = (uint32_t)input[i] << 16;
+    output[o++] = base64url_chars[(v >> 18) & 0x3F];
+    output[o++] = base64url_chars[(v >> 12) & 0x3F];
+  } else if (inputLen - i == 2) {
+    uint32_t v = ((uint32_t)input[i] << 16) | ((uint32_t)input[i + 1] << 8);
+    output[o++] = base64url_chars[(v >> 18) & 0x3F];
+    output[o++] = base64url_chars[(v >> 12) & 0x3F];
+    output[o++] = base64url_chars[(v >> 6) & 0x3F];
   }
-  output[outlen] = '\0';
-  return outlen;
+  output[o] = '\0';
+  return o;
 }
 
 size_t JWTHelper::createHeader(char* output, size_t outputSize) {
@@ -196,3 +204,4 @@ size_t JWTHelper::createPayload(
   return base64UrlEncode((uint8_t*)jsonBuffer, len, output, outputSize);
 }
 
+#endif // WITH_MQTT_BRIDGE

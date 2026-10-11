@@ -6,7 +6,9 @@
 #define USER_BTN_PRESSED LOW
 #endif
 
-#ifdef WITH_MQTT_BRIDGE
+#if defined(WITH_MQTT_BRIDGE) && defined(ETHERNET_ENABLED)
+#include <helpers/bridges/MQTTBridge.h>
+#elif defined(WITH_MQTT_BRIDGE)
 #include <WiFi.h>
 #endif
 
@@ -95,7 +97,17 @@ void UITask::renderCurrScreen() {
     sprintf(tmp, "BW: %03.2f CR: %d", _node_prefs->bw, _node_prefs->cr);
     _display->print(tmp);
 
-#ifdef WITH_MQTT_BRIDGE
+#if defined(WITH_MQTT_BRIDGE) && defined(ETHERNET_ENABLED)
+    // Display Ethernet IP address (cached by the bridge task; never touches the W5100S here)
+    uint8_t eth_ip[4];
+    MQTTBridge::getLocalIP(eth_ip);
+    if (eth_ip[0] != 0) {
+      _display->setCursor(0, 40);
+      _display->setColor(DisplayDriver::LIGHT);
+      snprintf(tmp, sizeof(tmp), "IP: %d.%d.%d.%d", eth_ip[0], eth_ip[1], eth_ip[2], eth_ip[3]);
+      _display->print(tmp);
+    }
+#elif defined(WITH_MQTT_BRIDGE)
     // Display IP address for MQTT bridge devices
     if (WiFi.status() == WL_CONNECTED) {
       IPAddress ip = WiFi.localIP();

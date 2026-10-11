@@ -1,3 +1,5 @@
+#ifdef WITH_MQTT_BRIDGE
+
 #include "MQTTMessageBuilder.h"
 #include <ArduinoJson.h>
 #include <cstring>
@@ -451,3 +453,5 @@ void MQTTMessageBuilder::packetToHex(mesh::Packet* packet, char* hex, size_t hex
   // Convert serialized packet to hex
   bytesToHex(raw_buf, raw_len, hex, hex_size);
 }
+
+#endif // WITH_MQTT_BRIDGE

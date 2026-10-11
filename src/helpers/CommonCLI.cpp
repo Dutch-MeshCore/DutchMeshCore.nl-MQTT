@@ -778,6 +778,7 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
         strcpy(reply, "ERR: clock cannot go backwards");
       }
     } else if (memcmp(command, "memory", 6) == 0) {
+#ifdef ESP_PLATFORM
       sprintf(reply, "Free: %d, Min: %d, Max: %d, Queue: %d, IntFree: %d, IntMax: %d, PSRAM: %d/%d",
               ESP.getFreeHeap(), ESP.getMinFreeHeap(), ESP.getMaxAllocHeap(),
               _callbacks->getQueueSize(),
@@ -785,6 +786,12 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
               (int)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
               (int)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
               (int)heap_caps_get_total_size(MALLOC_CAP_SPIRAM));
+#elif defined(NRF52_PLATFORM)
+      sprintf(reply, "Heap: %d/%d used, Queue: %d",
+              dbgHeapUsed(), dbgHeapTotal(), _callbacks->getQueueSize());
+#else
+      sprintf(reply, "Queue: %d", _callbacks->getQueueSize());
+#endif
     } else if (memcmp(command, "tls.bundletest ", 15) == 0) {
 #ifdef ESP_PLATFORM
       if (WiFi.status() != WL_CONNECTED) {
@@ -2070,6 +2077,10 @@ void CommonCLI::handleGetCmd(uint32_t sender_timestamp, char* command, char* rep
     sprintf(reply, "> %s", _prefs->wifi_ssid);
   } else if (memcmp(config, "wifi.pwd", 8) == 0) {
     sprintf(reply, "> %s", _prefs->wifi_password);
+#ifdef ETHERNET_ENABLED
+  } else if (memcmp(config, "eth.status", 10) == 0 || memcmp(config, "wifi.status", 11) == 0) {
+    MQTTBridge::formatNetStatusReply(reply, 160);
+#else
   } else if (memcmp(config, "wifi.status", 11) == 0) {
     wl_status_t status = WiFi.status();
     const char* status_str;
@@ -2123,6 +2134,7 @@ void CommonCLI::handleGetCmd(uint32_t sender_timestamp, char* command, char* rep
       sprintf(reply, "> %s (code: %d)", status_str, status);
 #endif
     }
+#endif  // ETHERNET_ENABLED
   } else if (memcmp(config, "wifi.powersave", 14) == 0) {
     uint8_t ps = _prefs->wifi_power_save;
     const char* ps_name = (ps == 1) ? "none" : (ps == 2) ? "max" : "min";

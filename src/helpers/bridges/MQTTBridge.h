@@ -1,5 +1,10 @@
 #pragma once
 
+#if defined(WITH_MQTT_BRIDGE) && defined(ETHERNET_ENABLED)
+// Wired Ethernet (W5100S) variant with the same class name and API (nRF52 / RAK4631 + RAK13800)
+#include "MQTTBridgeEthernet.h"
+#else
+
 #include "MeshCore.h"
 #include "helpers/bridges/BridgeBase.h"
 #include <PsychicMqttClient.h>
@@ -424,3 +429,5 @@ public:
 };
 
 #endif
+
+#endif  // WITH_MQTT_BRIDGE && ETHERNET_ENABLED

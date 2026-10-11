@@ -1437,6 +1437,10 @@ void MyMesh::loop() {
 #ifdef WITH_BRIDGE
   // bridge.loop() is now handled by FreeRTOS task on Core 0 - no need to call it here
 #endif
+#if defined(WITH_MQTT_BRIDGE) && defined(ETHERNET_ENABLED)
+  // Ethernet bridge: network I/O runs in its own task; loop() only applies NTP time to the RTC
+  if (bridge) bridge->loop();
+#endif
 
   if (next_flood_advert && millisHasNowPassed(next_flood_advert)) {
     mesh::Packet *pkt = createSelfAdvert();

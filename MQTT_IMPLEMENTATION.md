@@ -73,6 +73,54 @@ get mqtt.status
 
 ---
 
+## Ethernet Observer (RAK4631 + RAK13800)
+
+Besides the ESP32/WiFi observers there is a wired Ethernet variant for the nRF52-based
+**RAK4631** with a **RAK13800** (WIZnet W5100S) module in the WisBlock IO slot.
+
+**Build target:** `RAK_4631_repeater_observer_mqtt_eth`
+
+```bash
+pio run -e RAK_4631_repeater_observer_mqtt_eth -t upload
+```
+
+**What is the same as the WiFi observers**
+- Same slot/preset system and CLI (`set mqttN.preset`, `set mqtt.iata`, `get mqtt.status`, `get mqttN.diag`, ...)
+- Same presets, including `wss://` + Ed25519 JWT (default `dutchmeshcore-1` / `dutchmeshcore-2`)
+- Same topics and JSON payloads (status / packets / raw)
+
+**What is different**
+- No WiFi settings needed: the board uses DHCP on the Ethernet port. `wifi.ssid` / `wifi.pwd` are ignored.
+- `get eth.status` (also `get wifi.status`) shows link, IP, MAC and uptime.
+- Max **2 active MQTT slots** (W5100S has 4 sockets; each TLS slot uses ~19 KB RAM for BearSSL buffers).
+- MQTT publishes are QoS 0 (status messages too); retained flag follows the preset.
+- TLS: BearSSL, TLS 1.2 (ECDHE + AES-GCM / ChaCha20). Trust anchors are the CA certificates of the built-in
+  presets (GTS Root R4, ISRG Root X1); custom `mqtts://` / `wss://` brokers must chain to one of those.
+- SNMP is not available in this build.
+
+**Hardware / pins** (same as Meshtastic `rak4631_eth_gw`, overridable via build flags):
+
+| Signal | RAK4631 pin | Build flag |
+|--------|-------------|------------|
+| SPI CS | 26 (WB_SPI_CS) | `ETH_PIN_CS` |
+| SPI SCK / MISO / MOSI | 3 / 29 / 30 (IO slot SPI, own SPIM2 instance) | `ETH_PIN_SCK` / `ETH_PIN_MISO` / `ETH_PIN_MOSI` |
+| Reset | 21 (WB_IO3) | `ETH_PIN_RESET` |
+| Power (3V3_S) | 34 (WB_IO2) | `ETH_PIN_POWER` |
+
+**Implementation**
+- `src/helpers/bridges/MQTTBridgeEthernet.{h,cpp}` — same `MQTTBridge` class/API, selected by `MQTTBridge.h` when `ETHERNET_ENABLED` is defined
+- `src/helpers/net/BearTLSClient.{h,cpp}` — BearSSL TLS client on top of any Arduino `Client` (full 16 KB input record buffer)
+- `src/helpers/net/WSClient.{h,cpp}` — WebSocket client (`Sec-WebSocket-Protocol: mqtt`) as an Arduino `Client`
+- Stack per slot: `PubSubClient -> WSClient -> BearTLSClient -> EthernetClient`
+- All network I/O runs in its own FreeRTOS task; the W5100S is never accessed from the mesh loop. NTP time is
+  written to the RTC from the mesh loop task (I2C safety).
+- Uses upstream's `ETHERNET_ENABLED` flag, so `RAK4631Board.cpp` powers the IO slot (WB_IO2) from an early
+  constructor, before the framework starts (required for PoE boot).
+- Upstream's Ethernet CLI (`helpers/nrf52/EthernetCLI.h`, telnet on port 23) also keys off `ETHERNET_ENABLED`.
+  It must not run in the MQTT build: it would initialise the W5100S a second time from another task, and the
+  4 hardware sockets are already used by 2 MQTT slots, NTP and DHCP. When merging upstream, guard its blocks in
+  `examples/simple_repeater/main.cpp` with `#if defined(ETHERNET_ENABLED) && !defined(WITH_MQTT_BRIDGE)`.
+
 ## Overview
 
 The MQTT bridge implementation provides:
